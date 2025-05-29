@@ -422,6 +422,102 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				// Cleanup
 				Expect(k8sClient.Delete(ctx, deployment)).Should(Succeed())
 			})
+
+			It("Should remove deployment from APIs when annotations are removed", func() {
+				// Create a deployment with required annotations
+				deployment := &appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-removal",
+						Namespace: namespace,
+						Labels: map[string]string{
+							"app": "test",
+						},
+						Annotations: map[string]string{
+							"openapi.aggregator.io/path": "/api/docs",
+							"openapi.aggregator.io/port": "8080",
+						},
+					},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "test",
+							},
+						},
+						Template: corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"app": "test",
+								},
+							},
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{
+									{
+										Name:  "test",
+										Image: "test:latest",
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, deployment)).Should(Succeed())
+
+				// Create a service for the deployment
+				service := &corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-removal",
+						Namespace: namespace,
+					},
+					Spec: corev1.ServiceSpec{
+						Selector: map[string]string{
+							"app": "test",
+						},
+						Ports: []corev1.ServicePort{
+							{
+								Port:       8080,
+								TargetPort: intstr.FromInt(8080),
+							},
+						},
+						ClusterIP: "10.0.0.1", // Mock cluster IP
+					},
+				}
+				Expect(k8sClient.Create(ctx, service)).Should(Succeed())
+
+				// Update deployment status to be ready
+				deployment.Status.ReadyReplicas = 1
+				Expect(k8sClient.Status().Update(ctx, deployment)).Should(Succeed())
+
+				// First reconcile - should include the deployment
+				result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Requeue).To(BeFalse())
+
+				// Verify the deployment is included
+				aggregator := &observabilityv1alpha1.OpenAPIAggregator{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, aggregator)).To(Succeed())
+				Expect(aggregator.Status.CollectedAPIs).To(HaveLen(1))
+				Expect(aggregator.Status.CollectedAPIs[0].ResourceName).To(Equal("test-removal"))
+
+				// Remove the annotations
+				deployment = &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "test-removal", Namespace: namespace}, deployment)).To(Succeed())
+				deployment.Annotations = map[string]string{} // Remove all annotations
+				Expect(k8sClient.Update(ctx, deployment)).To(Succeed())
+
+				// Second reconcile - should exclude the deployment now
+				result, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Requeue).To(BeFalse())
+
+				// Verify the deployment is no longer included
+				aggregator = &observabilityv1alpha1.OpenAPIAggregator{}
+				Expect(k8sClient.Get(ctx, typeNamespacedName, aggregator)).To(Succeed())
+				Expect(aggregator.Status.CollectedAPIs).To(BeEmpty())
+
+				// Cleanup
+				Expect(k8sClient.Delete(ctx, deployment)).Should(Succeed())
+				Expect(k8sClient.Delete(ctx, service)).Should(Succeed())
+			})
 		})
 	})
 })

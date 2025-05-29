@@ -96,6 +96,14 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			continue
 		}
 
+		// Skip if deployment should not be included based on annotations
+		if !r.shouldIncludeDeployment(deploy, instance) {
+			logger.Info("Skipping deployment as it lacks required annotations",
+				"deployment", deploy.Name,
+				"namespace", deploy.Namespace)
+			continue
+		}
+
 		path, port := r.getAPIPathAndPort(deploy, instance)
 
 		// Get or create service for the deployment
@@ -217,6 +225,21 @@ func (r *OpenAPIAggregatorReconciler) findObjectsForWorkload(ctx context.Context
 	}
 
 	return requests
+}
+
+// shouldIncludeDeployment determines if a deployment should be included in the API collection
+// based on the presence of required annotations when IgnoreAnnotations is false
+func (r *OpenAPIAggregatorReconciler) shouldIncludeDeployment(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) bool {
+	// If IgnoreAnnotations is true, include all deployments
+	if instance.Spec.IgnoreAnnotations {
+		return true
+	}
+
+	// If IgnoreAnnotations is false, only include deployments that have at least one of the required annotations
+	_, hasPathAnnotation := deploy.Annotations[instance.Spec.PathAnnotation]
+	_, hasPortAnnotation := deploy.Annotations[instance.Spec.PortAnnotation]
+	
+	return hasPathAnnotation || hasPortAnnotation
 }
 
 func (r *OpenAPIAggregatorReconciler) getAPIPathAndPort(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) (string, string) {
