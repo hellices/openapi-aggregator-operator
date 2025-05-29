@@ -44,12 +44,35 @@ kind: OpenAPIAggregator
 metadata:
   name: example-aggregator
 spec:
-  displayNamePrefix: "API-"
+  defaultPath: "/v3/api-docs"    # OpenAPI 문서의 기본 경로
+  defaultPort: "8080"            # OpenAPI 문서를 제공하는 기본 포트
+  displayNamePrefix: "API-"      # Swagger UI에 표시될 서비스 이름 접두사
   labelSelector:
     app: myapp
-  path: /v3/api-docs
-  port: "8080"
+  pathAnnotation: "openapi.aggregator.io/path"    # 경로 override를 위한 annotation 키
+  portAnnotation: "openapi.aggregator.io/port"    # 포트 override를 위한 annotation 키
+  ignoreAnnotations: false       # annotation 무시 여부 (true면 기본값만 사용)
 ```
+
+### Annotation을 통한 커스터마이징
+각 서비스의 Deployment나 StatefulSet에서 annotation을 통해 OpenAPI 경로와 포트를 개별적으로 지정할 수 있습니다:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-service
+  annotations:
+    openapi.aggregator.io/path: "/swagger/api-docs"  # 기본 경로 대신 사용할 경로
+    openapi.aggregator.io/port: "9090"               # 기본 포트 대신 사용할 포트
+spec:
+  # ...
+```
+
+이를 통해:
+- 대부분의 서비스는 OpenAPIAggregator에 설정된 기본값을 사용
+- 필요한 서비스만 annotation으로 개별 설정 가능
+- `ignoreAnnotations: true` 설정으로 모든 서비스에 기본값 강제 적용 가능
 
 ## 현재 개발 상태
 - [x] 기본 Operator 구조 구현

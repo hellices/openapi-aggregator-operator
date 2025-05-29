@@ -96,6 +96,8 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			continue
 		}
 
+		path, port := r.getAPIPathAndPort(deploy, instance)
+
 		// Get or create service for the deployment
 		svc := &corev1.Service{}
 		svcName := deploy.Name
@@ -123,20 +125,9 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			continue
 		}
 
-		// Check for OpenAPI related annotations
-		openAPIPath := instance.Spec.Path
-		if path, ok := deploy.Annotations["openapi.path"]; ok {
-			openAPIPath = path
-		}
-
-		openAPIPort := instance.Spec.Port
-		if port, ok := deploy.Annotations["openapi.port"]; ok {
-			openAPIPort = port
-		}
-
 		apiInfo := observabilityv1alpha1.APIInfo{
 			Name:         instance.Spec.DisplayNamePrefix + deploy.Name,
-			URL:          fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, openAPIPort, openAPIPath),
+			URL:          fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, port, path),
 			LastUpdated:  metav1.Now().Format(time.RFC3339),
 			ResourceType: "Deployment",
 			ResourceName: deploy.Name,
@@ -226,4 +217,22 @@ func (r *OpenAPIAggregatorReconciler) findObjectsForWorkload(ctx context.Context
 	}
 
 	return requests
+}
+
+func (r *OpenAPIAggregatorReconciler) getAPIPathAndPort(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) (string, string) {
+	if instance.Spec.IgnoreAnnotations {
+		return instance.Spec.DefaultPath, instance.Spec.DefaultPort
+	}
+
+	path := deploy.Annotations[instance.Spec.PathAnnotation]
+	if path == "" {
+		path = instance.Spec.DefaultPath
+	}
+
+	port := deploy.Annotations[instance.Spec.PortAnnotation]
+	if port == "" {
+		port = instance.Spec.DefaultPort
+	}
+
+	return path, port
 }

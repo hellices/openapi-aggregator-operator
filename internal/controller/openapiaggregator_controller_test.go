@@ -8,11 +8,9 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
@@ -29,6 +27,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 			ctx                context.Context
 			typeNamespacedName types.NamespacedName
 			reconciler         *OpenAPIAggregatorReconciler
+			aggregator         *observabilityv1alpha1.OpenAPIAggregator
 		)
 
 		BeforeEach(func() {
@@ -44,51 +43,29 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 			}
 
 			// Create the OpenAPIAggregator object
-			aggregator := &observabilityv1alpha1.OpenAPIAggregator{
+			aggregator = &observabilityv1alpha1.OpenAPIAggregator{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
 					Namespace: namespace,
 				},
 				Spec: observabilityv1alpha1.OpenAPIAggregatorSpec{
-					DisplayNamePrefix: "Test-",
+					DefaultPath:       "/v3/api-docs",
+					DefaultPort:       "8080",
+					PathAnnotation:    "openapi.aggregator.io/path",
+					PortAnnotation:    "openapi.aggregator.io/port",
+					IgnoreAnnotations: false,
+					DisplayNamePrefix: "API-",
 					LabelSelector: map[string]string{
-						"app": "test-api",
+						"app": "test",
 					},
-					Path: "/v3/api-docs",
-					Port: "8080",
 				},
 			}
-			Expect(k8sClient.Create(ctx, aggregator)).To(Succeed())
+			Expect(k8sClient.Create(ctx, aggregator)).Should(Succeed())
 		})
 
 		AfterEach(func() {
-			// Clean up resources
-			By("Cleaning up the test resources")
-			resources := []client.Object{
-				&observabilityv1alpha1.OpenAPIAggregator{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: namespace,
-					},
-				},
-				&appsv1.Deployment{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-api",
-						Namespace: namespace,
-					},
-				},
-				&corev1.Service{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-api",
-						Namespace: namespace,
-					},
-				},
-			}
-
-			for _, res := range resources {
-				err := k8sClient.Delete(ctx, res)
-				Expect(err == nil || errors.IsNotFound(err)).To(BeTrue())
-			}
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, aggregator)).Should(Succeed())
 		})
 
 		Context("With a valid deployment", func() {
@@ -324,6 +301,126 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				aggregator := &observabilityv1alpha1.OpenAPIAggregator{}
 				Expect(k8sClient.Get(ctx, typeNamespacedName, aggregator)).To(Succeed())
 				Expect(aggregator.Status.CollectedAPIs).To(BeEmpty())
+			})
+		})
+
+		Context("With annotation handling", func() {
+			It("Should respect deployment annotations when IgnoreAnnotations is false", func() {
+				// Create a deployment with custom annotations
+				deployment := &appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-deployment",
+						Namespace: namespace,
+						Labels: map[string]string{
+							"app": "test",
+						},
+						Annotations: map[string]string{
+							"openapi.aggregator.io/path": "/custom/api-docs",
+							"openapi.aggregator.io/port": "9090",
+						},
+					},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "test",
+							},
+						},
+						Template: corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"app": "test",
+								},
+							},
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{
+									{
+										Name:  "test",
+										Image: "test:latest",
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, deployment)).Should(Succeed())
+
+				// Update deployment status to be ready
+				deployment.Status.ReadyReplicas = 1
+				Expect(k8sClient.Status().Update(ctx, deployment)).Should(Succeed())
+
+				// Reconcile
+				result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Requeue).To(BeFalse())
+
+				// Verify the custom path and port were used
+				path, port := reconciler.getAPIPathAndPort(*deployment, aggregator)
+				Expect(path).To(Equal("/custom/api-docs"))
+				Expect(port).To(Equal("9090"))
+
+				// Cleanup
+				Expect(k8sClient.Delete(ctx, deployment)).Should(Succeed())
+			})
+
+			It("Should ignore deployment annotations when IgnoreAnnotations is true", func() {
+				// Update aggregator to ignore annotations
+				aggregator.Spec.IgnoreAnnotations = true
+				Expect(k8sClient.Update(ctx, aggregator)).Should(Succeed())
+
+				// Create a deployment with custom annotations
+				deployment := &appsv1.Deployment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-deployment-2",
+						Namespace: namespace,
+						Labels: map[string]string{
+							"app": "test",
+						},
+						Annotations: map[string]string{
+							"openapi.aggregator.io/path": "/custom/api-docs",
+							"openapi.aggregator.io/port": "9090",
+						},
+					},
+					Spec: appsv1.DeploymentSpec{
+						Selector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "test",
+							},
+						},
+						Template: corev1.PodTemplateSpec{
+							ObjectMeta: metav1.ObjectMeta{
+								Labels: map[string]string{
+									"app": "test",
+								},
+							},
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{
+									{
+										Name:  "test",
+										Image: "test:latest",
+									},
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, deployment)).Should(Succeed())
+
+				// Update deployment status to be ready
+				deployment.Status.ReadyReplicas = 1
+				Expect(k8sClient.Status().Update(ctx, deployment)).Should(Succeed())
+
+				// Reconcile
+				result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.Requeue).To(BeFalse())
+
+				// Verify the default path and port were used
+				path, port := reconciler.getAPIPathAndPort(*deployment, aggregator)
+				Expect(path).To(Equal("/v3/api-docs"))
+				Expect(port).To(Equal("8080"))
+
+				// Cleanup
+				Expect(k8sClient.Delete(ctx, deployment)).Should(Succeed())
 			})
 		})
 	})

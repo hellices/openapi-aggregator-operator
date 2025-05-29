@@ -37,13 +37,27 @@ type OpenAPIAggregatorSpec struct {
 	LabelSelector map[string]string `json:"labelSelector,omitempty"`
 
 	// OpenAPI 경로 (예: /v3/api-docs)
-	Path string `json:"path,omitempty"`
+	// +kubebuilder:default="/v3/api-docs"
+	DefaultPath string `json:"defaultPath,omitempty"`
 
 	// 포트 이름 또는 번호 (예: "http" 또는 "8080")
-	Port string `json:"port,omitempty"`
+	// +kubebuilder:default="8080"
+	DefaultPort string `json:"defaultPort,omitempty"`
 
 	// Swagger UI에 표시할 이름 prefix
 	DisplayNamePrefix string `json:"displayNamePrefix,omitempty"`
+
+	// OpenAPI 경로를 지정하는 annotation 키
+	// +kubebuilder:default="openapi.aggregator.io/path"
+	PathAnnotation string `json:"pathAnnotation,omitempty"`
+
+	// OpenAPI 포트를 지정하는 annotation 키
+	// +kubebuilder:default="openapi.aggregator.io/port"
+	PortAnnotation string `json:"portAnnotation,omitempty"`
+
+	// annotation 무시 여부 (true면 기본값만 사용)
+	// +kubebuilder:default=false
+	IgnoreAnnotations bool `json:"ignoreAnnotations,omitempty"`
 }
 
 // OpenAPIAggregatorStatus defines the observed state of OpenAPIAggregator

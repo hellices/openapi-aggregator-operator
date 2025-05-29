@@ -39,9 +39,21 @@ spec:
           spec:
             description: OpenAPIAggregatorSpec defines the desired state of OpenAPIAggregator
             properties:
+              defaultPath:
+                default: /v3/api-docs
+                description: 'OpenAPI 경로 (예: /v3/api-docs)'
+                type: string
+              defaultPort:
+                default: "8080"
+                description: '포트 이름 또는 번호 (예: "http" 또는 "8080")'
+                type: string
               displayNamePrefix:
                 description: Swagger UI에 표시할 이름 prefix
                 type: string
+              ignoreAnnotations:
+                default: false
+                description: annotation 무시 여부 (true면 기본값만 사용)
+                type: boolean
               labelSelector:
                 additionalProperties:
                   type: string
@@ -53,11 +65,13 @@ spec:
                   Foo string `json:"foo,omitempty"`
                   감시할 네임스페이스 (빈 값이면 전체)
                 type: string
-              path:
-                description: 'OpenAPI 경로 (예: /v3/api-docs)'
+              pathAnnotation:
+                default: openapi.aggregator.io/path
+                description: OpenAPI 경로를 지정하는 annotation 키
                 type: string
-              port:
-                description: '포트 이름 또는 번호 (예: "http" 또는 "8080")'
+              portAnnotation:
+                default: openapi.aggregator.io/port
+                description: OpenAPI 포트를 지정하는 annotation 키
                 type: string
             type: object
           status:

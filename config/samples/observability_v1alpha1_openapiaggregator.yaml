@@ -6,8 +6,11 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: openapiaggregator-sample
 spec:
+  defaultPath: "/v3/api-docs"
+  defaultPort: "8080"
   displayNamePrefix: "API-"
   labelSelector:
     app: myapp
-  path: /v3/api-docs
-  port: "8080"
+  pathAnnotation: "openapi.aggregator.io/path"
+  portAnnotation: "openapi.aggregator.io/port"
+  ignoreAnnotations: false
