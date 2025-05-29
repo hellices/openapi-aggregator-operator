@@ -69,30 +69,33 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 		})
 
 		Context("With a valid deployment", func() {
+			var deployment *appsv1.Deployment
+			var service *corev1.Service
+
 			BeforeEach(func() {
 				// Create a test deployment
-				deployment := &appsv1.Deployment{
+				deployment = &appsv1.Deployment{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-api",
 						Namespace: namespace,
 						Labels: map[string]string{
-							"app": "test-api",
+							"app": "test",
 						},
 						Annotations: map[string]string{
-							"openapi.path": "/v3/api-docs",
-							"openapi.port": "8080",
+							"openapi.aggregator.io/path": "/v3/api-docs",
+							"openapi.aggregator.io/port": "8080",
 						},
 					},
 					Spec: appsv1.DeploymentSpec{
 						Selector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
-								"app": "test-api",
+								"app": "test",
 							},
 						},
 						Template: corev1.PodTemplateSpec{
 							ObjectMeta: metav1.ObjectMeta{
 								Labels: map[string]string{
-									"app": "test-api",
+									"app": "test",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -114,14 +117,14 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
 
 				// Create a service for the deployment
-				service := &corev1.Service{
+				service = &corev1.Service{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-api",
 						Namespace: namespace,
 					},
 					Spec: corev1.ServiceSpec{
 						Selector: map[string]string{
-							"app": "test-api",
+							"app": "test",
 						},
 						Ports: []corev1.ServicePort{
 							{
@@ -132,6 +135,16 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, service)).To(Succeed())
+			})
+
+			AfterEach(func() {
+				// Cleanup deployment and service
+				if deployment != nil {
+					Expect(k8sClient.Delete(ctx, deployment)).To(Succeed())
+				}
+				if service != nil {
+					Expect(k8sClient.Delete(ctx, service)).To(Succeed())
+				}
 			})
 
 			It("should collect API specs when deployment becomes ready", func() {
@@ -158,10 +171,10 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 
 				Expect(aggregator.Status.CollectedAPIs).To(HaveLen(1))
 				api := aggregator.Status.CollectedAPIs[0]
-				Expect(api.Name).To(Equal("Test-test-api"))
+				Expect(api.Name).To(Equal("API-test-api"))
 				Expect(api.ResourceType).To(Equal("Deployment"))
 				Expect(api.Namespace).To(Equal(namespace))
-				Expect(api.Annotations).To(HaveKeyWithValue("openapi.path", "/v3/api-docs"))
+				Expect(api.Annotations).To(HaveKeyWithValue("openapi.aggregator.io/path", "/v3/api-docs"))
 			})
 
 			It("should handle deployment updates", func() {
@@ -185,7 +198,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				deployment = &appsv1.Deployment{}
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "test-api", Namespace: namespace}, deployment)).To(Succeed())
 
-				deployment.Annotations["openapi.path"] = "/swagger/v3/api-docs"
+				deployment.Annotations["openapi.aggregator.io/path"] = "/swagger/v3/api-docs"
 				Expect(k8sClient.Update(ctx, deployment)).To(Succeed())
 
 				By("Second reconciliation")
@@ -200,7 +213,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 
 				Expect(aggregator.Status.CollectedAPIs).To(HaveLen(1))
 				api := aggregator.Status.CollectedAPIs[0]
-				Expect(api.Annotations).To(HaveKeyWithValue("openapi.path", "/swagger/v3/api-docs"))
+				Expect(api.Annotations).To(HaveKeyWithValue("openapi.aggregator.io/path", "/swagger/v3/api-docs"))
 			})
 		})
 
@@ -209,22 +222,22 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				By("Creating deployment without annotations")
 				deployment := &appsv1.Deployment{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-api",
+						Name:      "test-api-no-annotations",
 						Namespace: namespace,
 						Labels: map[string]string{
-							"app": "test-api",
+							"app": "test",
 						},
 					},
 					Spec: appsv1.DeploymentSpec{
 						Selector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
-								"app": "test-api",
+								"app": "test",
 							},
 						},
 						Template: corev1.PodTemplateSpec{
 							ObjectMeta: metav1.ObjectMeta{
 								Labels: map[string]string{
-									"app": "test-api",
+									"app": "test",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -239,6 +252,9 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
+				defer func() {
+					Expect(k8sClient.Delete(ctx, deployment)).To(Succeed())
+				}()
 
 				By("Reconciling the aggregator")
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -256,26 +272,26 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				By("Creating deployment without service")
 				deployment := &appsv1.Deployment{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-api",
+						Name:      "test-api-no-service",
 						Namespace: namespace,
 						Labels: map[string]string{
-							"app": "test-api",
+							"app": "test",
 						},
 						Annotations: map[string]string{
-							"openapi.path": "/v3/api-docs",
-							"openapi.port": "8080",
+							"openapi.aggregator.io/path": "/v3/api-docs",
+							"openapi.aggregator.io/port": "8080",
 						},
 					},
 					Spec: appsv1.DeploymentSpec{
 						Selector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
-								"app": "test-api",
+								"app": "test",
 							},
 						},
 						Template: corev1.PodTemplateSpec{
 							ObjectMeta: metav1.ObjectMeta{
 								Labels: map[string]string{
-									"app": "test-api",
+									"app": "test",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -290,6 +306,15 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, deployment)).To(Succeed())
+				defer func() {
+					Expect(k8sClient.Delete(ctx, deployment)).To(Succeed())
+				}()
+
+				// Set deployment status to ready so it gets processed
+				deployment.Status.Replicas = 1
+				deployment.Status.Replicas = 1
+				deployment.Status.ReadyReplicas = 1
+				Expect(k8sClient.Status().Update(ctx, deployment)).To(Succeed())
 
 				By("Reconciling the aggregator")
 				_, err := reconciler.Reconcile(ctx, reconcile.Request{
@@ -345,6 +370,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				Expect(k8sClient.Create(ctx, deployment)).Should(Succeed())
 
 				// Update deployment status to be ready
+				deployment.Status.Replicas = 1
 				deployment.Status.ReadyReplicas = 1
 				Expect(k8sClient.Status().Update(ctx, deployment)).Should(Succeed())
 
@@ -406,6 +432,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				Expect(k8sClient.Create(ctx, deployment)).Should(Succeed())
 
 				// Update deployment status to be ready
+				deployment.Status.Replicas = 1
 				deployment.Status.ReadyReplicas = 1
 				Expect(k8sClient.Status().Update(ctx, deployment)).Should(Succeed())
 
@@ -478,12 +505,13 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 								TargetPort: intstr.FromInt(8080),
 							},
 						},
-						ClusterIP: "10.0.0.1", // Mock cluster IP
+						ClusterIP: "10.0.0.100", // Mock cluster IP for testing
 					},
 				}
 				Expect(k8sClient.Create(ctx, service)).Should(Succeed())
 
 				// Update deployment status to be ready
+				deployment.Status.Replicas = 1
 				deployment.Status.ReadyReplicas = 1
 				Expect(k8sClient.Status().Update(ctx, deployment)).Should(Succeed())
 

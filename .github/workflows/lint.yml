@@ -9,13 +9,6 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.golangci.yml'
-  push:
-    branches: [ "main" ]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '.golangci.yml'
 
 jobs:
   golangci:
