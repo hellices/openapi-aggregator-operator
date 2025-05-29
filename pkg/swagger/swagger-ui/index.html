@@ -1,0 +1,207 @@
+<!-- HTML for the SwaggerUI page -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OpenAPI Aggregator</title>
+    <link rel="stylesheet" type="text/css" href="./assets/swagger-ui.css">
+    <link rel="icon" type="image/png" href="./assets/favicon-32x32.png" sizes="32x32" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+        #swagger-ui {
+            max-width: 1460px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .swagger-ui .topbar {
+            background: #1a237e;
+            padding: 10px 0;
+        }
+        .api-selector {
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+        .api-selector select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            font-size: 14px;
+        }
+        .api-info {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="api-selector">
+        <select id="apiSelector" onchange="loadSelectedAPI()">
+            <option value="">Loading APIs...</option>
+        </select>
+        <div id="apiInfo" class="api-info"></div>
+    </div>
+    <div id="swagger-ui"></div>
+    <script src="./assets/swagger-ui-bundle.js"></script>
+    <script src="./assets/swagger-ui-standalone-preset.js"></script>
+    <script>
+        let swaggerUI;
+        let apiSpecs = {};
+
+        function updateAPISelector(specs) {
+            const selector = document.getElementById('apiSelector');
+            selector.innerHTML = '';
+            
+            if (Object.keys(specs).length === 0) {
+                selector.innerHTML = '<option value="">No APIs available</option>';
+                return;
+            }
+
+            selector.innerHTML = '<option value="">Select an API...</option>';
+            Object.keys(specs).forEach(name => {
+                const api = specs[name];
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                selector.appendChild(option);
+            });
+        }
+
+        function updateAPIInfo(apiName) {
+            const infoDiv = document.getElementById('apiInfo');
+            if (!apiName || !apiSpecs[apiName]) {
+                infoDiv.innerHTML = '';
+                return;
+            }
+
+            const api = apiSpecs[apiName];
+            infoDiv.innerHTML = `
+                <div>Type: ${api.resourceType} | Name: ${api.resourceName}</div>
+                <div>Namespace: ${api.namespace}</div>
+                <div>Last Updated: ${api.lastUpdated}</div>
+            `;
+        }
+
+        function loadSelectedAPI() {
+            const selector = document.getElementById('apiSelector');
+            const selectedAPI = selector.value;
+            
+            updateAPIInfo(selectedAPI);
+            
+            if (!selectedAPI || !apiSpecs[selectedAPI]) {
+                if (swaggerUI) {
+                    swaggerUI.clear();
+                }
+                return;
+            }
+
+            const spec = apiSpecs[selectedAPI].openAPISpec;
+            
+            if (!swaggerUI) {
+                swaggerUI = SwaggerUIBundle({
+                    dom_id: '#swagger-ui',
+                    deepLinking: true,
+                    displayRequestDuration: true,
+                    filter: true,
+                    presets: [
+                        SwaggerUIBundle.presets.apis,
+                        SwaggerUIStandalonePreset
+                    ],
+                    plugins: [
+                        SwaggerUIBundle.plugins.DownloadUrl
+                    ],
+                    layout: "BaseLayout"
+                });
+            }
+
+            swaggerUI.specActions.updateSpec(spec);
+        }
+
+        window.onload = function() {
+            let retryCount = 0;
+            const maxRetries = 10;
+
+            function loadSpecs() {
+                console.log('Attempting to load specs, attempt ' + (retryCount + 1));
+                fetch('./swagger-specs')
+                    .then(response => {
+                        console.log('Response status:', response.status);
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(specs => {
+                        if (Object.keys(specs).length === 0) {
+                            throw new Error('No specs available');
+                        }
+
+                        // Get the first spec (we only show one at a time for now)
+                        const [firstSpecName, firstSpec] = Object.entries(specs)[0];
+                        
+                        const ui = SwaggerUIBundle({
+                            spec: firstSpec,  // Pass the spec directly
+                            dom_id: '#swagger-ui',
+                            deepLinking: true,
+                            displayRequestDuration: true,
+                            filter: true,
+                            docExpansion: 'list',
+                            presets: [
+                                SwaggerUIBundle.presets.apis,
+                                SwaggerUIStandalonePreset
+                            ],
+                            plugins: [
+                                SwaggerUIBundle.plugins.DownloadUrl
+                            ],
+                            layout: "StandaloneLayout"
+                        });
+                        window.ui = ui;
+                    })
+                    .catch(error => {
+                        console.error('Error loading specs:', error);
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            const delay = Math.min(1000 * Math.pow(2, retryCount), 10000); // 지수 백오프, 최대 10초
+                            console.log(`Retrying in ${delay}ms...`);
+                            setTimeout(loadSpecs, delay);
+                        } else {
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = 'error-message';
+                            errorDiv.style.padding = '20px';
+                            errorDiv.style.margin = '20px';
+                            errorDiv.style.backgroundColor = '#ffebee';
+                            errorDiv.style.border = '1px solid #ffcdd2';
+                            errorDiv.style.borderRadius = '4px';
+                            errorDiv.innerHTML = `
+                                <h2 style="color: #c62828; margin-top: 0;">Failed to load API specifications</h2>
+                                <p>Please check the following:</p>
+                                <ul>
+                                    <li>The operator pod is running</li>
+                                    <li>The OpenAPIAggregator CR is properly configured</li>
+                                    <li>Target services are running and accessible</li>
+                                    <li>Services expose OpenAPI specs at the configured paths</li>
+                                </ul>
+                                <p>Last error: ${error.message}</p>
+                                <button onclick="window.location.reload()" style="padding: 8px 16px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                    Retry
+                                </button>
+                            `;
+                            document.getElementById('swagger-ui').innerHTML = '';
+                            document.getElementById('swagger-ui').appendChild(errorDiv);
+                            document.getElementById('apiSelector').innerHTML = '<option value="">Load failed</option>';
+                        }
+                    });
+            }
+            loadSpecs();
+        };
+    </script>
+</body>
+</html>

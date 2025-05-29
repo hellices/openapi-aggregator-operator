@@ -1,0 +1,13 @@
+apiVersion: observability.aggregator.io/v1alpha1
+kind: OpenAPIAggregator
+metadata:
+  labels:
+    app.kubernetes.io/name: golang
+    app.kubernetes.io/managed-by: kustomize
+  name: openapiaggregator-sample
+spec:
+  displayNamePrefix: "API-"
+  labelSelector:
+    app: myapp
+  path: /v3/api-docs
+  port: "8080"
