@@ -1,15 +1,15 @@
 package controller
 
 import (
-	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
 	"github.com/yourname/openapi-aggregator-operator/pkg/swagger"
 )
 
-// TestSwaggerServer는 테스트를 위한 Swagger UI 서버 구현입니다.
+// TestSwaggerServer represents a test server for Swagger UI implementation.
 type TestSwaggerServer struct {
-	specs []observabilityv1alpha1.APIInfo
+	// No fields needed for this test wrapper
 }
 
+// NewTestSwaggerServer creates a new test instance of Swagger Server.
 func NewTestSwaggerServer() *swagger.Server {
 	return swagger.NewServer()
 }
