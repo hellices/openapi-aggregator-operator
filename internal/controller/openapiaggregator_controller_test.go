@@ -40,6 +40,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 				Client:        k8sClient,
 				Scheme:        k8sClient.Scheme(),
 				swaggerServer: NewTestSwaggerServer(),
+				TestMode:      true, // Enable test mode to skip network calls
 			}
 
 			// Create the OpenAPIAggregator object
@@ -312,7 +313,6 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 
 				// Set deployment status to ready so it gets processed
 				deployment.Status.Replicas = 1
-				deployment.Status.Replicas = 1
 				deployment.Status.ReadyReplicas = 1
 				Expect(k8sClient.Status().Update(ctx, deployment)).To(Succeed())
 
@@ -505,7 +505,7 @@ var _ = Describe("OpenAPIAggregator Controller", func() {
 								TargetPort: intstr.FromInt(8080),
 							},
 						},
-						ClusterIP: "10.0.0.100", // Mock cluster IP for testing
+						ClusterIP: "10.0.0.50", // Use valid test IP from the allowed range
 					},
 				}
 				Expect(k8sClient.Create(ctx, service)).Should(Succeed())

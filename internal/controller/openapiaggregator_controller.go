@@ -42,6 +42,7 @@ type OpenAPIAggregatorReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	swaggerServer *swagger.Server
+	TestMode      bool // Flag to disable network calls during testing
 }
 
 // +kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators,verbs=get;list;watch;create;update;patch;delete
@@ -143,14 +144,16 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			Annotations:  deploy.Annotations,
 		}
 
-		// Check if URL is reachable
-		resp, err := http.Get(apiInfo.URL)
-		if err != nil {
-			apiInfo.Error = fmt.Sprintf("Failed to reach service: %v", err)
-		} else {
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				apiInfo.Error = fmt.Sprintf("Service returned status code: %d", resp.StatusCode)
+		// Check if URL is reachable (skip in test mode)
+		if !r.TestMode {
+			resp, err := http.Get(apiInfo.URL)
+			if err != nil {
+				apiInfo.Error = fmt.Sprintf("Failed to reach service: %v", err)
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					apiInfo.Error = fmt.Sprintf("Service returned status code: %d", resp.StatusCode)
+				}
 			}
 		}
 
