@@ -238,7 +238,7 @@ func (r *OpenAPIAggregatorReconciler) shouldIncludeDeployment(deploy appsv1.Depl
 	// If IgnoreAnnotations is false, only include deployments that have at least one of the required annotations
 	_, hasPathAnnotation := deploy.Annotations[instance.Spec.PathAnnotation]
 	_, hasPortAnnotation := deploy.Annotations[instance.Spec.PortAnnotation]
-	
+
 	return hasPathAnnotation || hasPortAnnotation
 }
 
