@@ -2,6 +2,8 @@ module github.com/yourname/openapi-aggregator-operator
 
 go 1.22.0
 
+toolchain go1.23.9
+
 require (
 	github.com/onsi/ginkgo/v2 v2.19.0
 	github.com/onsi/gomega v1.33.1
