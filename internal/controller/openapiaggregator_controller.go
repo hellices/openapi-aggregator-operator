@@ -31,7 +31,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
 	"github.com/yourname/openapi-aggregator-operator/pkg/swagger"
@@ -42,6 +41,7 @@ type OpenAPIAggregatorReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	swaggerServer *swagger.Server
+	TestMode      bool // Flag to disable network calls during testing
 }
 
 // +kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators,verbs=get;list;watch;create;update;patch;delete
@@ -57,6 +57,92 @@ type OpenAPIAggregatorReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
+// processDeployment processes a single deployment and returns the API info if valid
+func (r *OpenAPIAggregatorReconciler) processDeployment(ctx context.Context, deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) (*observabilityv1alpha1.APIInfo, error) {
+	logger := log.FromContext(ctx)
+
+	// Skip if deployment is not ready
+	if deploy.Status.ReadyReplicas == 0 {
+		logger.Info("Skipping deployment as it has no ready replicas",
+			"deployment", deploy.Name,
+			"namespace", deploy.Namespace)
+		return nil, nil
+	}
+
+	// Skip if deployment should not be included based on annotations
+	if !r.shouldIncludeDeployment(deploy, instance) {
+		logger.Info("Skipping deployment as it lacks required annotations",
+			"deployment", deploy.Name,
+			"namespace", deploy.Namespace)
+		return nil, nil
+	}
+
+	path, port := r.getAPIPathAndPort(deploy, instance)
+
+	// Get or create service for the deployment
+	svc := &corev1.Service{}
+	svcName := deploy.Name
+	svcNS := deploy.Namespace
+
+	err := r.Get(ctx, types.NamespacedName{Name: svcName, Namespace: svcNS}, svc)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("Service not found for deployment",
+				"deployment", deploy.Name,
+				"namespace", deploy.Namespace)
+		} else {
+			logger.Error(err, "Failed to get service",
+				"deployment", deploy.Name,
+				"namespace", deploy.Namespace)
+		}
+		return nil, nil
+	}
+
+	// Get cluster IP of the service
+	if svc.Spec.ClusterIP == "" {
+		logger.Info("Service has no cluster IP",
+			"service", svc.Name,
+			"namespace", svc.Namespace)
+		return nil, nil
+	}
+
+	apiInfo := observabilityv1alpha1.APIInfo{
+		Name:         instance.Spec.DisplayNamePrefix + deploy.Name,
+		URL:          fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, port, path),
+		LastUpdated:  metav1.Now().Format(time.RFC3339),
+		ResourceType: "Deployment",
+		ResourceName: deploy.Name,
+		Namespace:    deploy.Namespace,
+		Annotations:  deploy.Annotations,
+	}
+
+	// Check if URL is reachable (skip in test mode)
+	if !r.TestMode {
+		r.checkAPIHealth(&apiInfo)
+	}
+
+	return &apiInfo, nil
+}
+
+// checkAPIHealth verifies if the API endpoint is reachable
+func (r *OpenAPIAggregatorReconciler) checkAPIHealth(apiInfo *observabilityv1alpha1.APIInfo) {
+	resp, err := http.Get(apiInfo.URL)
+	if err != nil {
+		apiInfo.Error = fmt.Sprintf("Failed to reach service: %v", err)
+		return
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("Error closing response body: %v\n", err)
+		}
+	}()
+	if resp.StatusCode != http.StatusOK {
+		apiInfo.Error = fmt.Sprintf("Service returned status code: %d", resp.StatusCode)
+	}
+}
+
+// Reconcile reconciles the OpenAPIAggregator resource by collecting API specifications
+// from deployments matching the label selector and updating the aggregator status.
 func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -88,65 +174,14 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// Collect OpenAPI specs from each deployment
 	var collectedAPIs []observabilityv1alpha1.APIInfo
 	for _, deploy := range deployments.Items {
-		// Skip if deployment is not ready
-		if deploy.Status.ReadyReplicas == 0 {
-			logger.Info("Skipping deployment as it has no ready replicas",
-				"deployment", deploy.Name,
-				"namespace", deploy.Namespace)
-			continue
-		}
-
-		path, port := r.getAPIPathAndPort(deploy, instance)
-
-		// Get or create service for the deployment
-		svc := &corev1.Service{}
-		svcName := deploy.Name
-		svcNS := deploy.Namespace
-
-		err := r.Get(ctx, types.NamespacedName{Name: svcName, Namespace: svcNS}, svc)
+		apiInfo, err := r.processDeployment(ctx, deploy, instance)
 		if err != nil {
-			if errors.IsNotFound(err) {
-				logger.Info("Service not found for deployment",
-					"deployment", deploy.Name,
-					"namespace", deploy.Namespace)
-			} else {
-				logger.Error(err, "Failed to get service",
-					"deployment", deploy.Name,
-					"namespace", deploy.Namespace)
-			}
+			logger.Error(err, "failed to process deployment", "deployment", deploy.Name)
 			continue
 		}
-
-		// Get cluster IP of the service
-		if svc.Spec.ClusterIP == "" {
-			logger.Info("Service has no cluster IP",
-				"service", svc.Name,
-				"namespace", svc.Namespace)
-			continue
+		if apiInfo != nil {
+			collectedAPIs = append(collectedAPIs, *apiInfo)
 		}
-
-		apiInfo := observabilityv1alpha1.APIInfo{
-			Name:         instance.Spec.DisplayNamePrefix + deploy.Name,
-			URL:          fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, port, path),
-			LastUpdated:  metav1.Now().Format(time.RFC3339),
-			ResourceType: "Deployment",
-			ResourceName: deploy.Name,
-			Namespace:    deploy.Namespace,
-			Annotations:  deploy.Annotations,
-		}
-
-		// Check if URL is reachable
-		resp, err := http.Get(apiInfo.URL)
-		if err != nil {
-			apiInfo.Error = fmt.Sprintf("Failed to reach service: %v", err)
-		} else {
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				apiInfo.Error = fmt.Sprintf("Service returned status code: %d", resp.StatusCode)
-			}
-		}
-
-		collectedAPIs = append(collectedAPIs, apiInfo)
 	}
 
 	// Update status
@@ -181,42 +216,19 @@ func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *OpenAPIAggregatorReconciler) findObjectsForWorkload(ctx context.Context, obj client.Object) []reconcile.Request {
-	// Get all OpenAPIAggregator instances
-	aggregators := &observabilityv1alpha1.OpenAPIAggregatorList{}
-	if err := r.List(context.Background(), aggregators); err != nil {
-		return nil
+// shouldIncludeDeployment determines if a deployment should be included in the API collection
+// based on the presence of required annotations when IgnoreAnnotations is false
+func (r *OpenAPIAggregatorReconciler) shouldIncludeDeployment(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) bool {
+	// If IgnoreAnnotations is true, include all deployments
+	if instance.Spec.IgnoreAnnotations {
+		return true
 	}
 
-	var requests []reconcile.Request
-	workloadLabels := obj.GetLabels()
+	// If IgnoreAnnotations is false, only include deployments that have at least one of the required annotations
+	_, hasPathAnnotation := deploy.Annotations[instance.Spec.PathAnnotation]
+	_, hasPortAnnotation := deploy.Annotations[instance.Spec.PortAnnotation]
 
-	for _, agg := range aggregators.Items {
-		// Check if the workload matches the label selector
-		matches := true
-		for k, v := range agg.Spec.LabelSelector {
-			if workloadLabels[k] != v {
-				matches = false
-				break
-			}
-		}
-
-		// Check namespace selector if specified
-		if matches && agg.Spec.NamespaceSelector != "" {
-			matches = obj.GetNamespace() == agg.Spec.NamespaceSelector
-		}
-
-		if matches {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      agg.Name,
-					Namespace: agg.Namespace,
-				},
-			})
-		}
-	}
-
-	return requests
+	return hasPathAnnotation || hasPortAnnotation
 }
 
 func (r *OpenAPIAggregatorReconciler) getAPIPathAndPort(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) (string, string) {

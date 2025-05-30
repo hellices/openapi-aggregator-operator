@@ -9,13 +9,6 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.golangci.yml'
-  push:
-    branches: [ "main" ]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '.golangci.yml'
 
 jobs:
   golangci:
@@ -27,7 +20,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.20'
+        go-version: '1.22'
         cache: true
 
     - name: golangci-lint
