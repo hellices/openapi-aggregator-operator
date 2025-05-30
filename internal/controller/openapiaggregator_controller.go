@@ -22,18 +22,15 @@ import (
 	"net/http"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
-	"github.com/yourname/openapi-aggregator-operator/pkg/swagger"
+	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
+	"github.com/hellices/openapi-aggregator-operator/pkg/swagger"
 )
 
 // OpenAPIAggregatorReconciler reconciles a OpenAPIAggregator object
@@ -41,210 +38,164 @@ type OpenAPIAggregatorReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	swaggerServer *swagger.Server
-	TestMode      bool // Flag to disable network calls during testing
+	TestMode      bool
 }
 
-// +kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators/finalizers,verbs=update
+//+kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the OpenAPIAggregator object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
-// processDeployment processes a single deployment and returns the API info if valid
-func (r *OpenAPIAggregatorReconciler) processDeployment(ctx context.Context, deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) (*observabilityv1alpha1.APIInfo, error) {
-	logger := log.FromContext(ctx)
-
-	// Skip if deployment is not ready
-	if deploy.Status.ReadyReplicas == 0 {
-		logger.Info("Skipping deployment as it has no ready replicas",
-			"deployment", deploy.Name,
-			"namespace", deploy.Namespace)
-		return nil, nil
-	}
-
-	// Skip if deployment should not be included based on annotations
-	if !r.shouldIncludeDeployment(deploy, instance) {
-		logger.Info("Skipping deployment as it lacks required annotations",
-			"deployment", deploy.Name,
-			"namespace", deploy.Namespace)
-		return nil, nil
-	}
-
-	path, port := r.getAPIPathAndPort(deploy, instance)
-
-	// Get or create service for the deployment
-	svc := &corev1.Service{}
-	svcName := deploy.Name
-	svcNS := deploy.Namespace
-
-	err := r.Get(ctx, types.NamespacedName{Name: svcName, Namespace: svcNS}, svc)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			logger.Info("Service not found for deployment",
-				"deployment", deploy.Name,
-				"namespace", deploy.Namespace)
-		} else {
-			logger.Error(err, "Failed to get service",
-				"deployment", deploy.Name,
-				"namespace", deploy.Namespace)
-		}
-		return nil, nil
-	}
-
-	// Get cluster IP of the service
-	if svc.Spec.ClusterIP == "" {
-		logger.Info("Service has no cluster IP",
-			"service", svc.Name,
-			"namespace", svc.Namespace)
-		return nil, nil
-	}
-
-	apiInfo := observabilityv1alpha1.APIInfo{
-		Name:         instance.Spec.DisplayNamePrefix + deploy.Name,
-		URL:          fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, port, path),
-		LastUpdated:  metav1.Now().Format(time.RFC3339),
-		ResourceType: "Deployment",
-		ResourceName: deploy.Name,
-		Namespace:    deploy.Namespace,
-		Annotations:  deploy.Annotations,
-	}
-
-	// Check if URL is reachable (skip in test mode)
-	if !r.TestMode {
-		r.checkAPIHealth(&apiInfo)
-	}
-
-	return &apiInfo, nil
-}
-
-// checkAPIHealth verifies if the API endpoint is reachable
-func (r *OpenAPIAggregatorReconciler) checkAPIHealth(apiInfo *observabilityv1alpha1.APIInfo) {
-	resp, err := http.Get(apiInfo.URL)
-	if err != nil {
-		apiInfo.Error = fmt.Sprintf("Failed to reach service: %v", err)
-		return
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("Error closing response body: %v\n", err)
-		}
-	}()
-	if resp.StatusCode != http.StatusOK {
-		apiInfo.Error = fmt.Sprintf("Service returned status code: %d", resp.StatusCode)
-	}
-}
-
-// Reconcile reconciles the OpenAPIAggregator resource by collecting API specifications
-// from deployments matching the label selector and updating the aggregator status.
+// Reconcile handles the reconciliation loop for OpenAPIAggregator resources
 func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	logger.Info("Starting reconciliation", "namespace", req.Namespace, "name", req.Name)
+
 	// Fetch the OpenAPIAggregator instance
 	instance := &observabilityv1alpha1.OpenAPIAggregator{}
-	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
+	err := r.Get(ctx, req.NamespacedName, instance)
+	if err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "unable to fetch OpenAPIAggregator")
 		return ctrl.Result{}, err
 	}
 
-	// List deployments matching the label selector
-	deployments := &appsv1.DeploymentList{}
-	listOpts := []client.ListOption{
-		client.MatchingLabels(instance.Spec.LabelSelector),
-	}
+	// List all services based on label selector
+	var services corev1.ServiceList
+	labelSelector := client.MatchingLabels(instance.Spec.LabelSelector)
+	logger.Info("Listing services", "labelSelector", instance.Spec.LabelSelector)
 
-	if instance.Spec.NamespaceSelector != "" {
-		listOpts = append(listOpts, client.InNamespace(instance.Spec.NamespaceSelector))
-	}
-
-	if err := r.List(ctx, deployments, listOpts...); err != nil {
-		logger.Error(err, "failed to list deployments")
+	if err := r.List(ctx, &services, labelSelector); err != nil {
+		logger.Error(err, "Failed to list services")
 		return ctrl.Result{}, err
 	}
+	logger.Info("Found services", "count", len(services.Items))
 
-	// Collect OpenAPI specs from each deployment
+	// Process each service and collect OpenAPI specs
 	var collectedAPIs []observabilityv1alpha1.APIInfo
-	for _, deploy := range deployments.Items {
-		apiInfo, err := r.processDeployment(ctx, deploy, instance)
-		if err != nil {
-			logger.Error(err, "failed to process deployment", "deployment", deploy.Name)
-			continue
-		}
-		if apiInfo != nil {
+	for _, service := range services.Items {
+		logger.Info("Processing service", "name", service.Name, "namespace", service.Namespace)
+
+		if apiInfo := r.processService(ctx, service, instance); apiInfo != nil {
+			logger.Info("Successfully collected API info", "service", service.Name, "url", apiInfo.URL)
 			collectedAPIs = append(collectedAPIs, *apiInfo)
+		} else {
+			logger.Info("Service skipped", "name", service.Name, "namespace", service.Namespace)
 		}
 	}
 
 	// Update status
 	instance.Status.CollectedAPIs = collectedAPIs
 	if err := r.Status().Update(ctx, instance); err != nil {
-		logger.Error(err, "failed to update OpenAPIAggregator status")
+		logger.Error(err, "Failed to update OpenAPIAggregator status")
 		return ctrl.Result{}, err
 	}
 
-	// Update Swagger UI specs
+	// Initialize Swagger UI server if not already initialized
+	if r.swaggerServer == nil {
+		r.swaggerServer = swagger.NewServer()
+		if !r.TestMode {
+			go func() {
+				logger.Info("Starting Swagger UI server on port 9090")
+				if err := r.swaggerServer.Start(9090); err != nil {
+					logger.Error(err, "Failed to start Swagger UI server")
+				}
+			}()
+		}
+	}
+
+	// Update Swagger UI with collected specs
+	logger.Info("Updating Swagger UI specs", "count", len(collectedAPIs))
 	r.swaggerServer.UpdateSpecs(collectedAPIs)
 
-	// Requeue after 5 minutes
-	return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
+	logger.Info("Reconciliation completed", "collectedAPIs", len(collectedAPIs))
+
+	// Requeue after 10 seconds
+	return ctrl.Result{RequeueAfter: time.Second * 10}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Create and start the Swagger UI server
-	r.swaggerServer = swagger.NewServer()
-	go func() {
-		if err := r.swaggerServer.Start(8080); err != nil {
-			mgr.GetLogger().Error(err, "Failed to start Swagger UI server")
-		}
-	}()
+// processService processes a single service and returns its API info if valid
+func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc corev1.Service, instance *observabilityv1alpha1.OpenAPIAggregator) *observabilityv1alpha1.APIInfo {
+	logger := log.FromContext(ctx).V(1)
 
-	// Watch the OpenAPIAggregator resource and related workloads
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&observabilityv1alpha1.OpenAPIAggregator{}).
-		Owns(&appsv1.Deployment{}).
-		Owns(&appsv1.StatefulSet{}).
-		Complete(r)
-}
-
-// shouldIncludeDeployment determines if a deployment should be included in the API collection
-// based on the presence of required annotations when IgnoreAnnotations is false
-func (r *OpenAPIAggregatorReconciler) shouldIncludeDeployment(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) bool {
-	// If IgnoreAnnotations is true, include all deployments
-	if instance.Spec.IgnoreAnnotations {
-		return true
+	// Check if the service has the required swagger annotation
+	if svc.Annotations[instance.Spec.SwaggerAnnotation] != "true" {
+		logger.Info("Skipping service - missing swagger annotation",
+			"service", svc.Name,
+			"namespace", svc.Namespace,
+			"requiredAnnotation", instance.Spec.SwaggerAnnotation)
+		return nil
 	}
 
-	// If IgnoreAnnotations is false, only include deployments that have at least one of the required annotations
-	_, hasPathAnnotation := deploy.Annotations[instance.Spec.PathAnnotation]
-	_, hasPortAnnotation := deploy.Annotations[instance.Spec.PortAnnotation]
-
-	return hasPathAnnotation || hasPortAnnotation
-}
-
-func (r *OpenAPIAggregatorReconciler) getAPIPathAndPort(deploy appsv1.Deployment, instance *observabilityv1alpha1.OpenAPIAggregator) (string, string) {
-	if instance.Spec.IgnoreAnnotations {
-		return instance.Spec.DefaultPath, instance.Spec.DefaultPort
-	}
-
-	path := deploy.Annotations[instance.Spec.PathAnnotation]
+	// Get path and port from annotations or defaults
+	path := svc.Annotations[instance.Spec.PathAnnotation]
 	if path == "" {
+		logger.Info("Using default path", "service", svc.Name, "defaultPath", instance.Spec.DefaultPath)
 		path = instance.Spec.DefaultPath
 	}
 
-	port := deploy.Annotations[instance.Spec.PortAnnotation]
+	port := svc.Annotations[instance.Spec.PortAnnotation]
 	if port == "" {
+		logger.Info("Using default port", "service", svc.Name, "defaultPort", instance.Spec.DefaultPort)
 		port = instance.Spec.DefaultPort
 	}
 
-	return path, port
+	// Create API info
+	apiInfo := &observabilityv1alpha1.APIInfo{
+		Name:         svc.Name,
+		ResourceName: svc.Name,
+		ResourceType: "Service",
+		Namespace:    svc.Namespace,
+		Path:         path,
+		Port:         port,
+		// URL:          fmt.Sprintf("http://%s.%s.svc.cluster.local:%s%s", svc.Name, svc.Namespace, port, path),
+		URL:         fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, port, path),
+		LastUpdated: time.Now().Format(time.RFC3339),
+		Annotations: svc.Annotations,
+	}
+
+	// Check if the OpenAPI endpoint is accessible
+
+	// TODO: Uncomment this line for production use
+	// r.checkAPIHealth(ctx, apiInfo)
+
+	return apiInfo
+}
+
+// checkAPIHealth verifies if the OpenAPI endpoint is accessible
+func (r *OpenAPIAggregatorReconciler) checkAPIHealth(ctx context.Context, apiInfo *observabilityv1alpha1.APIInfo) {
+	logger := log.FromContext(ctx).V(1)
+
+	logger.Info("Checking API health", "name", apiInfo.Name, "url", apiInfo.URL)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(apiInfo.URL)
+	if err != nil {
+		logger.Info("API health check failed", "name", apiInfo.Name, "error", err)
+		apiInfo.Error = fmt.Sprintf("Failed to access OpenAPI endpoint: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Info("API health check failed",
+			"name", apiInfo.Name,
+			"statusCode", resp.StatusCode,
+			"headers", resp.Header)
+		apiInfo.Error = fmt.Sprintf("OpenAPI endpoint returned non-200 status: %d", resp.StatusCode)
+		return
+	}
+
+	logger.Info("API health check successful", "name", apiInfo.Name)
+	apiInfo.Error = ""
+}
+
+// SetupWithManager sets up the controller with the Manager
+func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&observabilityv1alpha1.OpenAPIAggregator{}).
+		Owns(&corev1.Service{}).
+		Complete(r)
 }

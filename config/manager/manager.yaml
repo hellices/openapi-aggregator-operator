@@ -91,5 +91,30 @@ spec:
           requests:
             cpu: 10m
             memory: 64Mi
+        # Add network debugging tools
+        volumeMounts:
+        - name: busybox-tools
+          mountPath: /tools
+      initContainers:
+      - name: install-tools
+        image: busybox:1.28
+        command: ['sh', '-c', 'cp /bin/ping /tools/ && cp /bin/nslookup /tools/']
+        volumeMounts:
+        - name: busybox-tools
+          mountPath: /tools
+      volumes:
+      - name: busybox-tools
+        emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        nameservers:
+          - "10.96.0.10"  # Default Kubernetes DNS service IP
+        searches:
+          - "default.svc.cluster.local"
+          - "svc.cluster.local"
+          - "cluster.local"
+        options:
+          - name: ndots
+            value: "5"

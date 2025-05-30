@@ -4,26 +4,35 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 
-	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
+	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
 )
 
 //go:embed swagger-ui/*
 var swaggerUI embed.FS
 
+type APIMetadata struct {
+	Name        string
+	URL         string
+	Title       string
+	Version     string
+	Description string
+}
+
 // Server serves the Swagger UI and aggregated OpenAPI specs
 type Server struct {
-	specs    map[string]map[string]interface{}
+	specs    map[string]APIMetadata
 	specsMux sync.RWMutex
 }
 
 // NewServer creates a new Swagger UI server
 func NewServer() *Server {
 	return &Server{
-		specs: make(map[string]map[string]interface{}),
+		specs: make(map[string]APIMetadata),
 	}
 }
 
@@ -32,31 +41,34 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 	s.specsMux.Lock()
 	defer s.specsMux.Unlock()
 
-	newSpecs := make(map[string]map[string]interface{})
+	fmt.Printf("Updating specs with %d APIs\n", len(apis))
 
-	// Fetch and store new specs
+	newSpecs := make(map[string]APIMetadata)
 	for _, api := range apis {
+		fmt.Printf("Processing API %s (URL: %s, Error: %s)\n", api.Name, api.URL, api.Error)
 		if api.Error != "" {
 			continue
 		}
 
-		// Save API URL to be fetched on demand
-		newSpecs[api.Name] = map[string]interface{}{
-			"url": api.URL,
-			"info": map[string]interface{}{
-				"title":       api.Name,
-				"description": fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
-				"version":     "1.0.0",
-			},
+		// Store only metadata
+		metadata := APIMetadata{
+			Name:        api.Name,
+			URL:         api.URL,
+			Title:       api.Name,
+			Description: fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
 		}
-	}
 
-	// Always update specs (even if empty to clear old ones)
+		newSpecs[api.Name] = metadata
+		fmt.Printf("Added metadata for %s\n", api.Name)
+	}
+	fmt.Printf("Total APIs processed: %d\n", len(newSpecs))
 	s.specs = newSpecs
 }
 
 // fetchSpec fetches the OpenAPI spec from a service URL
 func (s *Server) fetchSpec(url string) (map[string]interface{}, error) {
+	fmt.Printf("Fetching OpenAPI spec from URL: %s\n", url)
+
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch spec: %v", err)
@@ -76,6 +88,7 @@ func (s *Server) fetchSpec(url string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to decode spec: %v", err)
 	}
 
+	fmt.Printf("Successfully fetched and decoded OpenAPI spec from %s\n", url)
 	return spec, nil
 }
 
@@ -93,73 +106,43 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// serveSpecs serves the API specs listing
+// serveSpecs serves the list of available API specs
 func (s *Server) serveSpecs(w http.ResponseWriter, r *http.Request) {
 	s.specsMux.RLock()
 	defer s.specsMux.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	if len(s.specs) == 0 {
-		w.WriteHeader(http.StatusNotFound)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": "No API specifications available"}); err != nil {
-			fmt.Printf("Error encoding JSON: %v\n", err)
-		}
-		return
-	}
-
-	response := make(map[string]interface{})
-	for name, info := range s.specs {
-		// Only include metadata in the listing
-		response[name] = map[string]interface{}{
-			"info": info["info"],
-			"url":  info["url"],
-		}
-	}
-
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		fmt.Printf("Failed to encode specs: %v\n", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	json.NewEncoder(w).Encode(s.specs)
 }
 
-// serveIndividualSpec serves a specific API spec by name
+// serveIndividualSpec serves individual OpenAPI spec by fetching it in real-time
 func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
+	apiName := strings.TrimPrefix(r.URL.Path, "/api/")
+
 	s.specsMux.RLock()
-	name := strings.TrimPrefix(r.URL.Path, "/swagger-specs/")
-	info, exists := s.specs[name]
+	metadata, exists := s.specs[apiName]
 	s.specsMux.RUnlock()
 
 	if !exists {
-		w.WriteHeader(http.StatusNotFound)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": "API specification not found"}); err != nil {
-			fmt.Printf("Error encoding JSON: %v\n", err)
-		}
+		http.Error(w, "API not found", http.StatusNotFound)
 		return
 	}
 
-	url, ok := info["url"].(string)
-	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": "Invalid URL in API specification"}); err != nil {
-			fmt.Printf("Error encoding JSON: %v\n", err)
-		}
-		return
-	}
-
-	spec, err := s.fetchSpec(url)
+	// Fetch the spec in real-time
+	resp, err := http.Get(metadata.URL)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		if err := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
-			fmt.Printf("Error encoding JSON: %v\n", err)
-		}
+		http.Error(w, fmt.Sprintf("Failed to fetch spec: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, fmt.Sprintf("Failed to fetch spec, status: %d", resp.StatusCode), resp.StatusCode)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(spec); err != nil {
-		fmt.Printf("Failed to encode spec: %v\n", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	io.Copy(w, resp.Body)
 }
 
 // serveStaticFiles serves embedded static files
@@ -223,5 +206,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Start starts the Swagger UI server
 func (s *Server) Start(port int) error {
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), s)
+	// Use the embedded file system instead of serving from disk
+	mux := http.NewServeMux()
+	mux.HandleFunc("/swagger-specs", s.serveSpecs)
+	mux.HandleFunc("/api/", s.serveIndividualSpec)
+	mux.HandleFunc("/", s.ServeHTTP)
+
+	fmt.Printf("Starting server on port %d\n", port)
+	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
 }

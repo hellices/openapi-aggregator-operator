@@ -61,6 +61,21 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+LOCALBIN ?= $(shell pwd)/bin
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+# CONTAINER_TOOL defines the container tool to be used for building images.
+# Be aware that the target commands are only tested with Docker which is
+# scaffolded by default. However, you might want to replace it to use other
+# tools. (i.e. podman)
+CONTAINER_TOOL ?= docker
+
+# Setting SHELL to bash allows bash commands to be executed by recipes.
+# Options are set to exit when a recipe line exits non-zero or a piped command fails.
+SHELL = /usr/bin/env bash -o pipefail
+.SHELLFLAGS = -ec
+
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
 # scaffolded by default. However, you might want to replace it to use other
@@ -131,7 +146,9 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	GOARCH=amd64 go build -o bin/manager-amd64 cmd/main.go
+	GOARCH=arm64 go build -o bin/manager-arm64 cmd/main.go
+	ln -sf manager-$$(go env GOARCH) bin/manager
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -156,14 +173,13 @@ docker-push: ## Push docker image with the manager.
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 .PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name golang-builder
-	$(CONTAINER_TOOL) buildx use golang-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm golang-builder
-	rm Dockerfile.cross
+docker-buildx: ## Build and push docker image for the manager for cross-platform
+	docker buildx create --use --name multi-platform-builder || true
+	docker buildx build --platform linux/amd64,linux/arm64 \
+		--tag ${IMG} \
+		--push \
+		.
+	docker buildx rm multi-platform-builder
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -239,15 +255,15 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 # $2 - package url which can be installed
 # $3 - specific version of package
 define go-install-tool
-@[ -f "$(1)-$(3)" ] || { \
+@[ -f "$(1)-$(3)-$$(go env GOARCH)" ] || { \
 set -e; \
 package=$(2)@$(3) ;\
-echo "Downloading $${package}" ;\
+echo "Downloading and building $${package} for $$(go env GOARCH)" ;\
 rm -f $(1) || true ;\
-GOBIN=$(LOCALBIN) go install $${package} ;\
-mv $(1) $(1)-$(3) ;\
+GOARCH=$$(go env GOARCH) GOBIN=$(LOCALBIN) go install $${package} ;\
+mv $(1) $(1)-$(3)-$$(go env GOARCH) ;\
 } ;\
-ln -sf $(1)-$(3) $(1)
+ln -sf $(1)-$(3)-$$(go env GOARCH) $(1)
 endef
 
 .PHONY: operator-sdk
@@ -322,3 +338,12 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+##@ Development tools
+
+.PHONY: install-tools
+install-tools: ## Install development tools
+	$(LOCALBIN)/controller-gen --version || $(MAKE) controller-gen
+	$(LOCALBIN)/kustomize --version || $(MAKE) kustomize
+	$(LOCALBIN)/envtest --version || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+	setup-envtest use --bin-dir $(LOCALBIN) 1.24.2

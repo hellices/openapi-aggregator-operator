@@ -1,16 +1,12 @@
 apiVersion: observability.aggregator.io/v1alpha1
 kind: OpenAPIAggregator
 metadata:
-  labels:
-    app.kubernetes.io/name: golang
-    app.kubernetes.io/managed-by: kustomize
-  name: openapiaggregator-sample
+  name: openapi-aggregator
 spec:
-  defaultPath: "/v3/api-docs"
-  defaultPort: "8080"
-  displayNamePrefix: "API-"
   labelSelector:
     app: myapp
+  defaultPath: "/v2/api-docs"
+  defaultPort: "8080"
+  swaggerAnnotation: "openapi.aggregator.io/swagger"
   pathAnnotation: "openapi.aggregator.io/path"
   portAnnotation: "openapi.aggregator.io/port"
-  ignoreAnnotations: false

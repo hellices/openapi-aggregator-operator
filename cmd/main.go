@@ -35,8 +35,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
-	"github.com/yourname/openapi-aggregator-operator/internal/controller"
+	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
+	"github.com/hellices/openapi-aggregator-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 

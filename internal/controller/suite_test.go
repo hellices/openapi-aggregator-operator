@@ -33,7 +33,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	observabilityv1alpha1 "github.com/yourname/openapi-aggregator-operator/api/v1alpha1"
+	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 

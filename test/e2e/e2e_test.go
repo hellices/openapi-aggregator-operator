@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/yourname/openapi-aggregator-operator/test/utils"
+	"github.com/hellices/openapi-aggregator-operator/test/utils"
 )
 
 const namespace = "golang-system"

@@ -22,10 +22,11 @@
         }
         .api-selector {
             background: white;
-            padding: 10px;
+            padding: 10px 20px;
             border-radius: 4px;
-            margin: 10px 0;
+            margin: 10px auto;
             box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            max-width: 1460px;
         }
         .api-selector select {
             width: 100%;
@@ -39,8 +40,11 @@
             margin-top: 10px;
             font-size: 12px;
             color: #666;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
         }
-    </style>
+        </style>
 </head>
 <body>
     <div class="api-selector">
@@ -103,26 +107,44 @@
                 return;
             }
 
-            const spec = apiSpecs[selectedAPI].openAPISpec;
-            
-            if (!swaggerUI) {
-                swaggerUI = SwaggerUIBundle({
-                    dom_id: '#swagger-ui',
-                    deepLinking: true,
-                    displayRequestDuration: true,
-                    filter: true,
-                    presets: [
-                        SwaggerUIBundle.presets.apis,
-                        SwaggerUIStandalonePreset
-                    ],
-                    plugins: [
-                        SwaggerUIBundle.plugins.DownloadUrl
-                    ],
-                    layout: "BaseLayout"
-                });
-            }
+            // Fetch the spec from the API endpoint
+            fetch('/api/' + selectedAPI)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch spec: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(spec => {
+                    if (!swaggerUI) {
+                        swaggerUI = SwaggerUIBundle({
+                            dom_id: '#swagger-ui',
+                            deepLinking: true,
+                            displayRequestDuration: true,
+                            filter: true,
+                            presets: [
+                                SwaggerUIBundle.presets.apis,
+                                SwaggerUIStandalonePreset
+                            ],
+                            plugins: [
+                                SwaggerUIBundle.plugins.DownloadUrl
+                            ],
+                            layout: "BaseLayout"
+                        });
+                    }
 
-            swaggerUI.specActions.updateSpec(spec);
+                    swaggerUI.specActions.updateSpec(JSON.stringify(spec));
+                })
+                .catch(error => {
+                    console.error('Error loading API spec:', error);
+                    const errorDiv = document.getElementById('swagger-ui');
+                    errorDiv.innerHTML = `
+                        <div style="padding: 20px; background-color: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px;">
+                            <h3 style="color: #c62828; margin-top: 0;">Failed to load API specification</h3>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                });
         }
 
         window.onload = function() {
@@ -131,7 +153,7 @@
 
             function loadSpecs() {
                 console.log('Attempting to load specs, attempt ' + (retryCount + 1));
-                fetch('./swagger-specs')
+                fetch('/swagger-specs')
                     .then(response => {
                         console.log('Response status:', response.status);
                         if (!response.ok) {
@@ -140,30 +162,11 @@
                         return response.json();
                     })
                     .then(specs => {
-                        if (Object.keys(specs).length === 0) {
-                            throw new Error('No specs available');
-                        }
-
-                        // Get the first spec (we only show one at a time for now)
-                        const [firstSpecName, firstSpec] = Object.entries(specs)[0];
+                        apiSpecs = specs;
+                        updateAPISelector(specs);
                         
-                        const ui = SwaggerUIBundle({
-                            spec: firstSpec,  // Pass the spec directly
-                            dom_id: '#swagger-ui',
-                            deepLinking: true,
-                            displayRequestDuration: true,
-                            filter: true,
-                            docExpansion: 'list',
-                            presets: [
-                                SwaggerUIBundle.presets.apis,
-                                SwaggerUIStandalonePreset
-                            ],
-                            plugins: [
-                                SwaggerUIBundle.plugins.DownloadUrl
-                            ],
-                            layout: "StandaloneLayout"
-                        });
-                        window.ui = ui;
+                        // Just update the selector, we'll initialize SwaggerUI when an API is selected
+                        updateAPISelector(specs);
                     })
                     .catch(error => {
                         console.error('Error loading specs:', error);

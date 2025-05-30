@@ -1,18 +1,16 @@
-name: Build
+name: PR Check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
     branches: [ "main" ]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Makefile'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v3
 
@@ -28,7 +26,14 @@ jobs:
         go mod verify
 
     - name: Build
-      run: make build
-
+      run: |
+        GOARCH=${{ matrix.arch }} make build
+        
     - name: Run tests
       run: make test
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: manager-${{ matrix.arch }}
+        path: bin/manager-${{ matrix.arch }}

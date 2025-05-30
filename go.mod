@@ -1,4 +1,4 @@
-module github.com/yourname/openapi-aggregator-operator
+module github.com/hellices/openapi-aggregator-operator
 
 go 1.22.0
 

@@ -20,77 +20,73 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // OpenAPIAggregatorSpec defines the desired state of OpenAPIAggregator
 type OpenAPIAggregatorSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of OpenAPIAggregator. Edit openapiaggregator_types.go to remove/update
-	// Foo string `json:"foo,omitempty"`
-	// 감시할 네임스페이스 (빈 값이면 전체)
-	NamespaceSelector string `json:"namespaceSelector,omitempty"`
-
-	// Deployment에 붙은 라벨 셀렉터
+	// LabelSelector selects target deployments to collect OpenAPI specs from
 	LabelSelector map[string]string `json:"labelSelector,omitempty"`
 
-	// OpenAPI 경로 (예: /v3/api-docs)
-	// +kubebuilder:default="/v3/api-docs"
+	// DefaultPath is the default path for OpenAPI documentation
+	// +kubebuilder:default="/v2/api-docs"
 	DefaultPath string `json:"defaultPath,omitempty"`
 
-	// 포트 이름 또는 번호 (예: "http" 또는 "8080")
+	// DefaultPort is the default port for OpenAPI documentation
 	// +kubebuilder:default="8080"
 	DefaultPort string `json:"defaultPort,omitempty"`
 
-	// Swagger UI에 표시할 이름 prefix
-	DisplayNamePrefix string `json:"displayNamePrefix,omitempty"`
+	// SwaggerAnnotation is the annotation key that indicates if the Service should be included
+	// +kubebuilder:default="openapi.aggregator.io/swagger"
+	SwaggerAnnotation string `json:"swaggerAnnotation,omitempty"`
 
-	// OpenAPI 경로를 지정하는 annotation 키
+	// PathAnnotation is the annotation key for OpenAPI path
 	// +kubebuilder:default="openapi.aggregator.io/path"
 	PathAnnotation string `json:"pathAnnotation,omitempty"`
 
-	// OpenAPI 포트를 지정하는 annotation 키
+	// PortAnnotation is the annotation key for OpenAPI port
 	// +kubebuilder:default="openapi.aggregator.io/port"
 	PortAnnotation string `json:"portAnnotation,omitempty"`
-
-	// annotation 무시 여부 (true면 기본값만 사용)
-	// +kubebuilder:default=false
-	IgnoreAnnotations bool `json:"ignoreAnnotations,omitempty"`
 }
 
 // OpenAPIAggregatorStatus defines the observed state of OpenAPIAggregator
 type OpenAPIAggregatorStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
 	// CollectedAPIs contains information about the OpenAPI specs that have been collected
 	CollectedAPIs []APIInfo `json:"collectedAPIs,omitempty"`
 }
 
 // APIInfo contains information about a collected OpenAPI spec
 type APIInfo struct {
-	// Name is the name of the API (usually from displayNamePrefix + deployment name)
+	// Name is the name of the API (usually same as deployment name)
 	Name string `json:"name"`
+
 	// URL is the full URL where the OpenAPI spec can be accessed
 	URL string `json:"url"`
+
 	// LastUpdated is when the spec was last successfully collected
 	LastUpdated string `json:"lastUpdated"`
+
 	// Error is set if there was an error collecting the spec
 	Error string `json:"error,omitempty"`
-	// ResourceType is the type of the kubernetes resource (Deployment, StatefulSet, etc)
+
+	// ResourceType is the type of the kubernetes resource (Deployment)
 	ResourceType string `json:"resourceType"`
+
 	// ResourceName is the name of the kubernetes resource
 	ResourceName string `json:"resourceName"`
+
 	// Namespace is the namespace of the kubernetes resource
 	Namespace string `json:"namespace"`
+
+	// Path is the OpenAPI spec path for this service
+	Path string `json:"path"`
+
+	// Port is the port for this service's OpenAPI spec
+	Port string `json:"port"`
+
 	// Annotations stores relevant annotations from the resource
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
+//+kubebuilder:object:root=true
+//+kubebuilder:subresource:status
 
 // OpenAPIAggregator is the Schema for the openapiaggregators API
 type OpenAPIAggregator struct {
@@ -101,7 +97,7 @@ type OpenAPIAggregator struct {
 	Status OpenAPIAggregatorStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:object:root=true
+//+kubebuilder:object:root=true
 
 // OpenAPIAggregatorList contains a list of OpenAPIAggregator
 type OpenAPIAggregatorList struct {

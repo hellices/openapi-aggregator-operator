@@ -40,38 +40,31 @@ spec:
             description: OpenAPIAggregatorSpec defines the desired state of OpenAPIAggregator
             properties:
               defaultPath:
-                default: /v3/api-docs
-                description: 'OpenAPI 경로 (예: /v3/api-docs)'
+                default: /v2/api-docs
+                description: DefaultPath is the default path for OpenAPI documentation
                 type: string
               defaultPort:
                 default: "8080"
-                description: '포트 이름 또는 번호 (예: "http" 또는 "8080")'
+                description: DefaultPort is the default port for OpenAPI documentation
                 type: string
-              displayNamePrefix:
-                description: Swagger UI에 표시할 이름 prefix
-                type: string
-              ignoreAnnotations:
-                default: false
-                description: annotation 무시 여부 (true면 기본값만 사용)
-                type: boolean
               labelSelector:
                 additionalProperties:
                   type: string
-                description: Deployment에 붙은 라벨 셀렉터
+                description: LabelSelector selects target deployments to collect OpenAPI
+                  specs from
                 type: object
-              namespaceSelector:
-                description: |-
-                  Foo is an example field of OpenAPIAggregator. Edit openapiaggregator_types.go to remove/update
-                  Foo string `json:"foo,omitempty"`
-                  감시할 네임스페이스 (빈 값이면 전체)
-                type: string
               pathAnnotation:
                 default: openapi.aggregator.io/path
-                description: OpenAPI 경로를 지정하는 annotation 키
+                description: PathAnnotation is the annotation key for OpenAPI path
                 type: string
               portAnnotation:
                 default: openapi.aggregator.io/port
-                description: OpenAPI 포트를 지정하는 annotation 키
+                description: PortAnnotation is the annotation key for OpenAPI port
+                type: string
+              swaggerAnnotation:
+                default: openapi.aggregator.io/swagger
+                description: SwaggerAnnotation is the annotation key that indicates
+                  if the Service should be included
                 type: string
             type: object
           status:
@@ -99,18 +92,24 @@ spec:
                         collected
                       type: string
                     name:
-                      description: Name is the name of the API (usually from displayNamePrefix
-                        + deployment name)
+                      description: Name is the name of the API (usually same as deployment
+                        name)
                       type: string
                     namespace:
                       description: Namespace is the namespace of the kubernetes resource
+                      type: string
+                    path:
+                      description: Path is the OpenAPI spec path for this service
+                      type: string
+                    port:
+                      description: Port is the port for this service's OpenAPI spec
                       type: string
                     resourceName:
                       description: ResourceName is the name of the kubernetes resource
                       type: string
                     resourceType:
                       description: ResourceType is the type of the kubernetes resource
-                        (Deployment, StatefulSet, etc)
+                        (Deployment)
                       type: string
                     url:
                       description: URL is the full URL where the OpenAPI spec can
@@ -120,6 +119,8 @@ spec:
                   - lastUpdated
                   - name
                   - namespace
+                  - path
+                  - port
                   - resourceName
                   - resourceType
                   - url

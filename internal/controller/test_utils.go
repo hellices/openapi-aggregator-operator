@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"github.com/yourname/openapi-aggregator-operator/pkg/swagger"
+	"github.com/hellices/openapi-aggregator-operator/pkg/swagger"
 )
 
 // TestSwaggerServer represents a test server for Swagger UI implementation.
