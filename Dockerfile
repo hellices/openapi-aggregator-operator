@@ -17,16 +17,30 @@ COPY api/ api/
 COPY internal/controller/ internal/controller/
 COPY pkg/ pkg/
 
-# Build
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
+# Build architecture-specific binary
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager_${TARGETARCH} cmd/main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM --platform=${TARGETOS}/${TARGETARCH} gcr.io/distroless/static:nonroot
+# Get CA certificates from alpine for secure communication
+FROM alpine:3.21 AS certificates
+RUN apk --no-cache add ca-certificates
+
+# Create minimal runtime image 
+FROM scratch
+
+ARG TARGETARCH
+
 WORKDIR /
-COPY --from=builder /workspace/manager .
+
+# Copy the certificates
+COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# Copy the architecture-specific binary
+COPY --from=builder /workspace/manager_${TARGETARCH} manager
+
 # Copy Swagger UI static files
 COPY --from=builder /workspace/pkg/swagger/swagger-ui/ /swagger-ui/
+
+# Use non-root user
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]

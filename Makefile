@@ -1,11 +1,15 @@
-# VERSION gets the version from the most recent git tag
+# Common variables and settings
 VERSION ?= $(shell git describe --tags)
+ARCH ?= $(shell go env GOARCH)
+GOOS ?= linux
+PLATFORMS ?= linux/arm64,linux/amd64
 
-# CHANNELS define the bundle channels used in the bundle.
-# Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
-# To re-generate a bundle for other specific channels without changing the standard setup, you can:
-# - use the CHANNELS as arg of the bundle target (e.g make bundle CHANNELS=candidate,fast,stable)
-# - use environment variables to overwrite this value (e.g export CHANNELS="candidate,fast,stable")
+# VERSION_PKG is where version info is stored in the code
+VERSION_PKG ?= github.com/hellices/openapi-aggregator-operator/pkg/version
+
+# LDFLAGS for the build
+COMMON_LDFLAGS ?= -s -w
+OPERATOR_LDFLAGS ?= -X ${VERSION_PKG}.version=${VERSION} -X ${VERSION_PKG}.buildDate=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 ifneq ($(origin CHANNELS), undefined)
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
 endif
@@ -45,13 +49,15 @@ endif
 # Set the Operator SDK version to use. By default, what is installed on the system is used.
 # This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
 OPERATOR_SDK_VERSION ?= v1.39.2
-# Image URL to use all building/pushing image targets
+# Image configuration
 DOCKER_USER ?= hellices
 IMG_PREFIX ?= ghcr.io/${DOCKER_USER}
 IMG_REPO ?= openapi-aggregator-operator
 IMG ?= ${IMG_PREFIX}/${IMG_REPO}:${VERSION}
-# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+
+# Testing configuration
 ENVTEST_K8S_VERSION = 1.31.0
+MIN_KUBERNETES_VERSION ?= 1.23.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -145,9 +151,9 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	GOARCH=amd64 go build -o bin/manager-amd64 cmd/main.go
-	GOARCH=arm64 go build -o bin/manager-arm64 cmd/main.go
-	ln -sf manager-$$(go env GOARCH) bin/manager
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=amd64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=arm64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go
+	ln -sf manager_$(ARCH) bin/manager
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -158,7 +164,12 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg TARGETOS=$(GOOS) \
+		--build-arg TARGETARCH=$(ARCH) \
+		-t ${IMG} \
+		.
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -172,14 +183,18 @@ docker-push: ## Push docker image with the manager.
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
 PLATFORMS ?= linux/arm64,linux/amd64
 .PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform
+docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	docker run --privileged --rm tonistiigi/binfmt --install all
 	docker buildx create --use --name multi-platform-builder || true
-	docker buildx build --platform $(PLATFORMS) \
+	# Build and push multi-platform images
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILDKIT_CONTEXT_KEEP_GIT_DIR=1 \
 		--tag ${IMG} \
 		--push \
 		.
+	# Remove the builder instance
 	docker buildx rm multi-platform-builder
 
 .PHONY: build-installer
