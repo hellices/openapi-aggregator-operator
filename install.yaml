@@ -1,0 +1,479 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+    control-plane: controller-manager
+  name: openapi-aggregator-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.1
+  name: openapiaggregators.observability.aggregator.io
+spec:
+  group: observability.aggregator.io
+  names:
+    kind: OpenAPIAggregator
+    listKind: OpenAPIAggregatorList
+    plural: openapiaggregators
+    singular: openapiaggregator
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: OpenAPIAggregator is the Schema for the openapiaggregators API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OpenAPIAggregatorSpec defines the desired state of OpenAPIAggregator
+            properties:
+              defaultPath:
+                default: /v2/api-docs
+                description: DefaultPath is the default path for OpenAPI documentation
+                type: string
+              defaultPort:
+                default: "8080"
+                description: DefaultPort is the default port for OpenAPI documentation
+                type: string
+              labelSelector:
+                additionalProperties:
+                  type: string
+                description: LabelSelector selects target deployments to collect OpenAPI
+                  specs from
+                type: object
+              pathAnnotation:
+                default: openapi.aggregator.io/path
+                description: PathAnnotation is the annotation key for OpenAPI path
+                type: string
+              portAnnotation:
+                default: openapi.aggregator.io/port
+                description: PortAnnotation is the annotation key for OpenAPI port
+                type: string
+              swaggerAnnotation:
+                default: openapi.aggregator.io/swagger
+                description: SwaggerAnnotation is the annotation key that indicates
+                  if the Service should be included
+                type: string
+            type: object
+          status:
+            description: OpenAPIAggregatorStatus defines the observed state of OpenAPIAggregator
+            properties:
+              collectedAPIs:
+                description: CollectedAPIs contains information about the OpenAPI
+                  specs that have been collected
+                items:
+                  description: APIInfo contains information about a collected OpenAPI
+                    spec
+                  properties:
+                    annotations:
+                      additionalProperties:
+                        type: string
+                      description: Annotations stores relevant annotations from the
+                        resource
+                      type: object
+                    error:
+                      description: Error is set if there was an error collecting the
+                        spec
+                      type: string
+                    lastUpdated:
+                      description: LastUpdated is when the spec was last successfully
+                        collected
+                      type: string
+                    name:
+                      description: Name is the name of the API (usually same as deployment
+                        name)
+                      type: string
+                    namespace:
+                      description: Namespace is the namespace of the kubernetes resource
+                      type: string
+                    path:
+                      description: Path is the OpenAPI spec path for this service
+                      type: string
+                    port:
+                      description: Port is the port for this service's OpenAPI spec
+                      type: string
+                    resourceName:
+                      description: ResourceName is the name of the kubernetes resource
+                      type: string
+                    resourceType:
+                      description: ResourceType is the type of the kubernetes resource
+                        (Deployment)
+                      type: string
+                    url:
+                      description: URL is the full URL where the OpenAPI spec can
+                        be accessed
+                      type: string
+                  required:
+                  - lastUpdated
+                  - name
+                  - namespace
+                  - path
+                  - port
+                  - resourceName
+                  - resourceType
+                  - url
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+  name: openapi-aggregator-controller-manager
+  namespace: openapi-aggregator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+  name: openapi-aggregator-leader-election-role
+  namespace: openapi-aggregator-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openapi-aggregator-manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openapi-aggregator-metrics-auth-role
+rules:
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: openapi-aggregator-metrics-reader
+rules:
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+  name: openapi-aggregator-openapiaggregator-editor-role
+rules:
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+  name: openapi-aggregator-openapiaggregator-viewer-role
+rules:
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - observability.aggregator.io
+  resources:
+  - openapiaggregators/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+  name: openapi-aggregator-leader-election-rolebinding
+  namespace: openapi-aggregator-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openapi-aggregator-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: openapi-aggregator-controller-manager
+  namespace: openapi-aggregator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+  name: openapi-aggregator-manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openapi-aggregator-manager-role
+subjects:
+- kind: ServiceAccount
+  name: openapi-aggregator-controller-manager
+  namespace: openapi-aggregator-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openapi-aggregator-metrics-auth-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openapi-aggregator-metrics-auth-role
+subjects:
+- kind: ServiceAccount
+  name: openapi-aggregator-controller-manager
+  namespace: openapi-aggregator-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+    control-plane: controller-manager
+  name: openapi-aggregator-controller-manager-metrics-service
+  namespace: openapi-aggregator-system
+spec:
+  ports:
+  - name: metrics
+    port: 8080
+    protocol: TCP
+    targetPort: metrics
+  selector:
+    control-plane: controller-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: openapi-aggregator-openapi-aggregator-metrics
+  namespace: openapi-aggregator-system
+spec:
+  ports:
+  - name: metrics
+    port: 8080
+    protocol: TCP
+    targetPort: metrics
+  selector:
+    control-plane: controller-manager
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: openapi-aggregator-openapi-aggregator-swagger-ui
+  namespace: openapi-aggregator-system
+spec:
+  ports:
+  - name: swagger-ui
+    port: 9090
+    protocol: TCP
+    targetPort: swagger-ui
+  selector:
+    control-plane: controller-manager
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: golang
+    control-plane: controller-manager
+  name: openapi-aggregator-controller-manager
+  namespace: openapi-aggregator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --metrics-bind-address=:8080
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --metrics-secure=false
+        - --metrics-bind-address=:8080
+        command:
+        - /manager
+        image: ghcr.io/hellices/openapi-aggregator-operator:0.1.0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 9090
+          name: swagger-ui
+          protocol: TCP
+        - containerPort: 8081
+          name: health-probe
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      securityContext:
+        runAsNonRoot: true
+      serviceAccountName: openapi-aggregator-controller-manager
+      terminationGracePeriodSeconds: 10

@@ -1,4 +1,5 @@
 # This file contains the version information for OpenAPI Aggregator Operator
+0.2-dev
 # The version numbers are used during the build process
 
 # Represents the current release of the OpenAPI Aggregator Operator
