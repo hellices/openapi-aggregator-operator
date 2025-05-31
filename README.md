@@ -120,8 +120,18 @@ make deploy
 
 For installation via Operator Lifecycle Manager, see detailed instructions in [OLM Installation Guide](docs/olm-install.md).
 
-### Development Commands
+### Development Environment Setup
 
+1. Deploy the test service:
+```bash
+# First, deploy the test service that provides OpenAPI specs
+kubectl apply -f config/samples/test-service.yaml
+
+# Port forward the test service to localhost:8080
+kubectl port-forward svc/test-service 8080:8080
+```
+
+2. Run the operator in development mode:
 ```bash
 # Run locally
 make run
@@ -135,6 +145,8 @@ make docker-build docker-push
 # Generate manifests
 make manifests
 ```
+
+Note: When running the operator in development mode with `make run`, ensure that the test service is running and port-forwarded to localhost:8080. This is required for the operator to properly fetch and display the OpenAPI specifications in the Swagger UI.
 
 ### Version Management
 

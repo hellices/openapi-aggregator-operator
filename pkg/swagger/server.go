@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
@@ -108,10 +109,14 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch the spec in real-time
-	resp, err := http.Get(metadata.URL)
-	// for test
-	// fmt.Printf("Metadata for %s: %+v, exists: %v\n", apiName, metadata, exists)
-	// resp, err := http.Get("https://petstore.swagger.io/v2/swagger.json")
+	url := metadata.URL
+	if os.Getenv("DEV_MODE") == "true" {
+		// In development mode, rewrite any cluster URLs to localhost:8080
+		if strings.Contains(url, ".svc.cluster.local:8080") {
+			url = "http://localhost:8080" + strings.Split(url, ".svc.cluster.local:8080")[1]
+		}
+	}
+	resp, err := http.Get(url)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec: %v", err), http.StatusInternalServerError)
 		return
@@ -191,6 +196,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveStaticFiles(w, r)
 	}
 }
+
+//TODO: swagger에서 보내는 요청을 모두 server.go로 리다이렉트하는 기능 추가. 서버는 이걸 받아서 proxy 요청을 보내는 기능을 구현해야 함.
 
 // Start starts the Swagger UI server
 func (s *Server) Start(port int) error {
