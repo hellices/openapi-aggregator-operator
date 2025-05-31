@@ -20,22 +20,13 @@ COPY pkg/ pkg/
 # Build
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 
-# Install qemu-user-static for arm64 architecture
-RUN if [ "${TARGETARCH}" = "arm64" ]; then \
-        apt-get update && apt-get install -y qemu-user-static && \
-        mkdir -p /qemu-user-static && \
-        cp /usr/bin/qemu-aarch64-static /qemu-user-static/; \
-    fi
-
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+FROM --platform=${TARGETOS}/${TARGETARCH} gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
 # Copy Swagger UI static files
 COPY --from=builder /workspace/pkg/swagger/swagger-ui/ /swagger-ui/
-# Copy qemu-user-static if building for arm64
-COPY --from=builder /qemu-user-static/ /usr/bin/
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
