@@ -215,6 +215,12 @@ func (s *Server) Start(port int) error {
 	mux.HandleFunc("/api/", s.serveIndividualSpec)
 	mux.HandleFunc("/", s.ServeHTTP)
 
-	fmt.Printf("Starting server on port %d\n", port)
-	return http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
+	srv := &http.Server{
+		Addr:      fmt.Sprintf(":%d", port),
+		Handler:   mux,
+		TLSConfig: nil, // Disable TLS
+	}
+
+	fmt.Printf("Starting server on port %d (HTTP)\n", port)
+	return srv.ListenAndServe()
 }

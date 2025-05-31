@@ -93,19 +93,6 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, err
 	}
 
-	// Initialize Swagger UI server if not already initialized
-	if r.swaggerServer == nil {
-		r.swaggerServer = swagger.NewServer()
-		if !r.TestMode {
-			go func() {
-				logger.Info("Starting Swagger UI server on port 9090")
-				if err := r.swaggerServer.Start(9090); err != nil {
-					logger.Error(err, "Failed to start Swagger UI server")
-				}
-			}()
-		}
-	}
-
 	// Update Swagger UI with collected specs
 	logger.Info("Updating Swagger UI specs", "count", len(collectedAPIs))
 	r.swaggerServer.UpdateSpecs(collectedAPIs)
@@ -192,10 +179,21 @@ func (r *OpenAPIAggregatorReconciler) checkAPIHealth(ctx context.Context, apiInf
 	apiInfo.Error = ""
 }
 
-// SetupWithManager sets up the controller with the Manager
+// SetupWithManager sets up the controller with the Manager.
 func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Initialize Swagger UI server
+	r.swaggerServer = swagger.NewServer()
+	if !r.TestMode {
+		go func() {
+			log.Log.Info("Starting Swagger UI server on HTTP port 9090")
+			if err := r.swaggerServer.Start(9090); err != nil {
+				log.Log.Error(err, "Failed to start Swagger UI server")
+			}
+		}()
+	}
+	
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&observabilityv1alpha1.OpenAPIAggregator{}).
-		Owns(&corev1.Service{}).
+		Watches(&corev1.Service{}, &ctrl.EnqueueRequestForObject{}).
 		Complete(r)
 }

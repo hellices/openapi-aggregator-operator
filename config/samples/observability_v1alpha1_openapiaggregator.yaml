@@ -3,8 +3,6 @@ kind: OpenAPIAggregator
 metadata:
   name: openapi-aggregator
 spec:
-  labelSelector:
-    app: myapp
   defaultPath: "/v2/api-docs"
   defaultPort: "8080"
   swaggerAnnotation: "openapi.aggregator.io/swagger"
