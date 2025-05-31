@@ -60,6 +60,55 @@ Then open http://localhost:9090 in your browser.
 - 📝 **Service Information**: Displays service metadata including namespace and resource type
 - ⚡ **Zero-config Services**: Works with any service that exposes an OpenAPI/Swagger specification
 
+### 5. Ingress/Route Integration
+
+You can expose the Swagger UI through Ingress or OpenShift Route. 
+
+#### Using Kubernetes Ingress
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-ui
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - host: api.example.com
+    http:
+      paths:
+      - path: /swagger-ui(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: openapi-aggregator-openapi-aggregator-swagger-ui
+            port:
+              number: 9090
+```
+
+And set the environment variable in the deployment:
+```yaml
+env:
+- name: SWAGGER_BASE_PATH
+  value: /swagger-ui
+```
+
+#### Using OpenShift Route
+
+```yaml
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: swagger-ui
+spec:
+  to:
+    kind: Service
+    name: openapi-aggregator-openapi-aggregator-swagger-ui
+  port:
+    targetPort: swagger-ui
+```
+
 ## Project Architecture
 
 ### Components

@@ -60,6 +60,11 @@
 
         // API Data Management
         const apiManager = {
+            getBasePath() {
+                // Get base path from server or default to ''
+                return document.querySelector('meta[name="base-path"]')?.getAttribute('content') || '';
+            },
+
             groupApisByNamespace(specs) {
                 state.currentApisByNamespace = {};
                 Object.keys(specs).forEach(name => {
@@ -239,7 +244,8 @@
                 }
 
                 try {
-                    const response = await fetch('/api/' + apiName);
+                    const basePath = apiManager.getBasePath();
+                    const response = await fetch(`${basePath}/api/${apiName}`);
                     if (!response.ok) {
                         throw new Error(`Failed to fetch spec: ${response.status}`);
                     }

@@ -34,12 +34,14 @@ type APIMetadata struct {
 type Server struct {
 	specs    map[string]APIMetadata // Map of API name to metadata
 	specsMux sync.RWMutex           // Mutex for thread-safe access to specs
+	basePath string                 // Base path for the server (for Ingress/Route support)
 }
 
 // NewServer creates a new Swagger UI server
 func NewServer() *Server {
 	return &Server{
-		specs: make(map[string]APIMetadata),
+		specs:    make(map[string]APIMetadata),
+		basePath: os.Getenv("SWAGGER_BASE_PATH"),
 	}
 }
 
@@ -71,6 +73,14 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 	s.specs = newSpecs
 }
 
+// stripBasePath removes the base path prefix from the request path
+func (s *Server) stripBasePath(path string) string {
+	if s.basePath != "" && strings.HasPrefix(path, s.basePath) {
+		return strings.TrimPrefix(path, s.basePath)
+	}
+	return path
+}
+
 // serveIndex serves the Swagger UI index page
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	indexContent, err := swaggerUI.ReadFile("swagger-ui/index.html")
@@ -78,8 +88,14 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read index.html", http.StatusInternalServerError)
 		return
 	}
+
+	// Add base path meta tag
+	htmlContent := string(indexContent)
+	metaTag := fmt.Sprintf(`<meta name="base-path" content="%s">`, s.basePath)
+	htmlContent = strings.Replace(htmlContent, "</head>", metaTag+"</head>", 1)
+
 	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write(indexContent); err != nil {
+	if _, err := w.Write([]byte(htmlContent)); err != nil {
 		http.Error(w, "Failed to write response", http.StatusInternalServerError)
 	}
 }
@@ -136,11 +152,13 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 
 // serveStaticFiles serves embedded static files
 func (s *Server) serveStaticFiles(w http.ResponseWriter, r *http.Request) {
+	path := s.stripBasePath(r.URL.Path)
+
 	// First try assets subdirectory for static files
-	content, err := swaggerUI.ReadFile("swagger-ui/assets" + r.URL.Path)
+	content, err := swaggerUI.ReadFile("swagger-ui/assets" + path)
 	if err != nil {
 		// If not found in assets, try the root swagger-ui directory
-		content, err = swaggerUI.ReadFile("swagger-ui" + r.URL.Path)
+		content, err = swaggerUI.ReadFile("swagger-ui" + path)
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -148,8 +166,9 @@ func (s *Server) serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set appropriate content type based on file extension
-	contentType := s.getContentType(r.URL.Path)
+	contentType := s.getContentType(path)
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Add caching for static files
 
 	if _, err := w.Write(content); err != nil {
 		http.Error(w, "Failed to write response", http.StatusInternalServerError)
@@ -173,10 +192,11 @@ func (s *Server) getContentType(path string) string {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Set common headers
+	// Set common headers with more permissive CORS
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Length")
 
 	// Handle OPTIONS requests for CORS
 	if r.Method == "OPTIONS" {
@@ -184,13 +204,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Strip base path if configured
+	path := s.stripBasePath(r.URL.Path)
+
 	// Route to appropriate handler
 	switch {
-	case r.URL.Path == "/" || r.URL.Path == "/index.html":
+	case path == "/" || path == "/index.html":
 		s.serveIndex(w, r)
-	case r.URL.Path == "/swagger-specs":
+	case path == "/swagger-specs":
 		s.serveSpecs(w, r)
-	case strings.HasPrefix(r.URL.Path, "/swagger-specs/"):
+	case strings.HasPrefix(path, "/api/"):
 		s.serveIndividualSpec(w, r)
 	default:
 		s.serveStaticFiles(w, r)
