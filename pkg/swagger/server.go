@@ -1,3 +1,4 @@
+// Package swagger provides a Swagger UI server for displaying OpenAPI specifications
 package swagger
 
 import (
@@ -15,22 +16,23 @@ import (
 //go:embed swagger-ui/*
 var swaggerUI embed.FS
 
+// APIMetadata represents metadata about an OpenAPI specification
 type APIMetadata struct {
-	Name         string `json:"name"`
-	URL          string `json:"url"`
-	Title        string `json:"title"`
-	Version      string `json:"version"`
-	Description  string `json:"description"`
-	ResourceType string `json:"resourceType"`
-	ResourceName string `json:"resourceName"`
-	Namespace    string `json:"namespace"`
-	LastUpdated  string `json:"lastUpdated"`
+	Name         string `json:"name"`         // API name
+	URL          string `json:"url"`          // URL to fetch the OpenAPI spec
+	Title        string `json:"title"`        // Display title
+	Version      string `json:"version"`      // API version
+	Description  string `json:"description"`  // API description
+	ResourceType string `json:"resourceType"` // Type of resource (e.g., Service, Deployment)
+	ResourceName string `json:"resourceName"` // Name of the Kubernetes resource
+	Namespace    string `json:"namespace"`    // Kubernetes namespace
+	LastUpdated  string `json:"lastUpdated"`  // Last update timestamp
 }
 
 // Server serves the Swagger UI and aggregated OpenAPI specs
 type Server struct {
-	specs    map[string]APIMetadata
-	specsMux sync.RWMutex
+	specs    map[string]APIMetadata // Map of API name to metadata
+	specsMux sync.RWMutex           // Mutex for thread-safe access to specs
 }
 
 // NewServer creates a new Swagger UI server
@@ -47,6 +49,7 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 
 	newSpecs := make(map[string]APIMetadata)
 	for _, api := range apis {
+		// Skip APIs with errors
 		if api.Error != "" {
 			continue
 		}
@@ -64,48 +67,19 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 
 		newSpecs[api.Name] = metadata
 	}
-	fmt.Printf("Total APIs processed: %d\n", len(newSpecs))
 	s.specs = newSpecs
-}
-
-// fetchSpec fetches the OpenAPI spec from a service URL
-func (s *Server) fetchSpec(url string) (map[string]interface{}, error) {
-	fmt.Printf("Fetching OpenAPI spec from URL: %s\n", url)
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch spec: %v", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("Error closing response body: %v\n", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("service returned status code: %d", resp.StatusCode)
-	}
-
-	var spec map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&spec); err != nil {
-		return nil, fmt.Errorf("failed to decode spec: %v", err)
-	}
-
-	fmt.Printf("Successfully fetched and decoded OpenAPI spec from %s\n", url)
-	return spec, nil
 }
 
 // serveIndex serves the Swagger UI index page
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	indexContent, err := swaggerUI.ReadFile("swagger-ui/index.html")
 	if err != nil {
-		fmt.Printf("Failed to read index.html: %v\n", err)
 		http.Error(w, "Failed to read index.html", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html")
 	if _, err := w.Write(indexContent); err != nil {
-		fmt.Printf("Error writing index content: %v\n", err)
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
 	}
 }
 
@@ -115,7 +89,9 @@ func (s *Server) serveSpecs(w http.ResponseWriter, r *http.Request) {
 	defer s.specsMux.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.specs)
+	if err := json.NewEncoder(w).Encode(s.specs); err != nil {
+		http.Error(w, "Failed to encode specs", http.StatusInternalServerError)
+	}
 }
 
 // serveIndividualSpec serves individual OpenAPI spec by fetching it in real-time
@@ -148,17 +124,15 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		http.Error(w, "Failed to copy response", http.StatusInternalServerError)
+	}
 }
 
 // serveStaticFiles serves embedded static files
 func (s *Server) serveStaticFiles(w http.ResponseWriter, r *http.Request) {
-	// For other paths, try to serve from embedded files
 	// First try assets subdirectory for static files
-	var content []byte
-	var err error
-
-	content, err = swaggerUI.ReadFile("swagger-ui/assets" + r.URL.Path)
+	content, err := swaggerUI.ReadFile("swagger-ui/assets" + r.URL.Path)
 	if err != nil {
 		// If not found in assets, try the root swagger-ui directory
 		content, err = swaggerUI.ReadFile("swagger-ui" + r.URL.Path)
@@ -168,20 +142,28 @@ func (s *Server) serveStaticFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Set content type based on file extension
-	switch {
-	case strings.HasSuffix(r.URL.Path, ".css"):
-		w.Header().Set("Content-Type", "text/css")
-	case strings.HasSuffix(r.URL.Path, ".js"):
-		w.Header().Set("Content-Type", "application/javascript")
-	case strings.HasSuffix(r.URL.Path, ".png"):
-		w.Header().Set("Content-Type", "image/png")
-	case strings.HasSuffix(r.URL.Path, ".html"):
-		w.Header().Set("Content-Type", "text/html")
-	}
+	// Set appropriate content type based on file extension
+	contentType := s.getContentType(r.URL.Path)
+	w.Header().Set("Content-Type", contentType)
 
 	if _, err := w.Write(content); err != nil {
-		fmt.Printf("Error writing content: %v\n", err)
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+	}
+}
+
+// getContentType determines the content type based on file extension
+func (s *Server) getContentType(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".css"):
+		return "text/css"
+	case strings.HasSuffix(path, ".js"):
+		return "application/javascript"
+	case strings.HasSuffix(path, ".png"):
+		return "image/png"
+	case strings.HasSuffix(path, ".html"):
+		return "text/html"
+	default:
+		return "application/octet-stream"
 	}
 }
 
