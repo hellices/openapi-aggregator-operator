@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -49,9 +50,7 @@ type OpenAPIAggregatorReconciler struct {
 
 // Reconcile handles the reconciliation loop for OpenAPIAggregator resources
 func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	logger.Info("Starting reconciliation", "namespace", req.Namespace, "name", req.Name)
+	logger := log.FromContext(ctx).V(1) // 기본 로그 레벨을 1로 설정
 
 	// Fetch the OpenAPIAggregator instance
 	instance := &observabilityv1alpha1.OpenAPIAggregator{}
@@ -66,24 +65,18 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// List all services based on label selector
 	var services corev1.ServiceList
 	labelSelector := client.MatchingLabels(instance.Spec.LabelSelector)
-	logger.Info("Listing services", "labelSelector", instance.Spec.LabelSelector)
 
 	if err := r.List(ctx, &services, labelSelector); err != nil {
 		logger.Error(err, "Failed to list services")
 		return ctrl.Result{}, err
 	}
-	logger.Info("Found services", "count", len(services.Items))
 
 	// Process each service and collect OpenAPI specs
 	var collectedAPIs []observabilityv1alpha1.APIInfo
 	for _, service := range services.Items {
-		logger.Info("Processing service", "name", service.Name, "namespace", service.Namespace)
-
 		if apiInfo := r.processService(ctx, service, instance); apiInfo != nil {
-			logger.Info("Collected API info", "service", service.Name, "url", apiInfo.URL)
+			logger.V(1).Info("Collected API info", "service", service.Name, "url", apiInfo.URL)
 			collectedAPIs = append(collectedAPIs, *apiInfo)
-		} else {
-			logger.V(1).Info("Service skipped", "name", service.Name, "namespace", service.Namespace)
 		}
 	}
 
@@ -96,10 +89,9 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// Update Swagger UI with collected specs
-	logger.Info("Updating Swagger UI specs", "count", len(collectedAPIs))
 	r.swaggerServer.UpdateSpecs(collectedAPIs)
 
-	logger.Info("Reconciliation completed", "collectedAPIs", len(collectedAPIs))
+	logger.V(1).Info("Reconciliation completed", "collectedAPIs", len(collectedAPIs))
 
 	// Requeue after 10 seconds
 	return ctrl.Result{RequeueAfter: time.Second * 10}, nil
@@ -121,27 +113,42 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 	// Get path and port from annotations or defaults
 	path := svc.Annotations[instance.Spec.PathAnnotation]
 	if path == "" {
-		logger.Info("Using default path", "service", svc.Name, "defaultPath", instance.Spec.DefaultPath)
 		path = instance.Spec.DefaultPath
 	}
 
 	port := svc.Annotations[instance.Spec.PortAnnotation]
 	if port == "" {
-		logger.Info("Using default port", "service", svc.Name, "defaultPort", instance.Spec.DefaultPort)
 		port = instance.Spec.DefaultPort
+	}
+
+	// Process allowed methods
+	allowedMethods := make([]string, 0)
+	methodsStr := svc.Annotations[instance.Spec.AllowedMethodsAnnotation]
+
+	if methodsStr != "" {
+		// Split the string by comma and trim spaces
+		for _, method := range strings.Split(methodsStr, ",") {
+			method = strings.ToLower(strings.TrimSpace(method))
+			// Validate method
+			switch method {
+			case "get", "put", "post", "delete", "options", "head", "patch", "trace":
+				allowedMethods = append(allowedMethods, method)
+			}
+		}
 	}
 
 	// Create API info
 	apiInfo := &observabilityv1alpha1.APIInfo{
-		Name:         svc.Name,
-		ResourceName: svc.Name,
-		ResourceType: "Service",
-		Namespace:    svc.Namespace,
-		Path:         path,
-		Port:         port,
-		URL:          fmt.Sprintf("http://%s.%s.svc.cluster.local:%s%s", svc.Name, svc.Namespace, port, path),
-		LastUpdated:  time.Now().Format(time.RFC3339),
-		Annotations:  svc.Annotations,
+		Name:           svc.Name,
+		ResourceName:   svc.Name,
+		ResourceType:   "Service",
+		Namespace:      svc.Namespace,
+		Path:           path,
+		Port:           port,
+		URL:            fmt.Sprintf("http://%s.%s.svc.cluster.local:%s%s", svc.Name, svc.Namespace, port, path),
+		LastUpdated:    time.Now().Format(time.RFC3339),
+		Annotations:    svc.Annotations,
+		AllowedMethods: allowedMethods,
 	}
 
 	// Enable health check to validate accessibility
@@ -155,27 +162,24 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 func (r *OpenAPIAggregatorReconciler) checkAPIHealth(ctx context.Context, apiInfo *observabilityv1alpha1.APIInfo) {
 	logger := log.FromContext(ctx).V(1)
 
-	logger.Info("Checking API health", "name", apiInfo.Name, "url", apiInfo.URL)
-
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(apiInfo.URL)
 	if err != nil {
-		logger.Info("API health check failed", "name", apiInfo.Name, "error", err)
+		logger.V(1).Info("API health check failed", "name", apiInfo.Name, "error", err)
 		apiInfo.Error = fmt.Sprintf("Failed to access OpenAPI endpoint: %v", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Info("API health check failed",
+		logger.V(1).Info("API health check failed",
 			"name", apiInfo.Name,
-			"statusCode", resp.StatusCode,
-			"headers", resp.Header)
+			"statusCode", resp.StatusCode)
 		apiInfo.Error = fmt.Sprintf("OpenAPI endpoint returned non-200 status: %d", resp.StatusCode)
 		return
 	}
 
-	logger.Info("API health check successful", "name", apiInfo.Name)
+	logger.V(2).Info("API health check successful", "name", apiInfo.Name)
 	apiInfo.Error = ""
 }
 

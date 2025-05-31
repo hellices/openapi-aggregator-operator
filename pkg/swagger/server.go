@@ -19,15 +19,16 @@ var swaggerUI embed.FS
 
 // APIMetadata represents metadata about an OpenAPI specification
 type APIMetadata struct {
-	Name         string `json:"name"`         // API name
-	URL          string `json:"url"`          // URL to fetch the OpenAPI spec
-	Title        string `json:"title"`        // Display title
-	Version      string `json:"version"`      // API version
-	Description  string `json:"description"`  // API description
-	ResourceType string `json:"resourceType"` // Type of resource (e.g., Service, Deployment)
-	ResourceName string `json:"resourceName"` // Name of the Kubernetes resource
-	Namespace    string `json:"namespace"`    // Kubernetes namespace
-	LastUpdated  string `json:"lastUpdated"`  // Last update timestamp
+	Name           string   `json:"name"`           // API name
+	URL            string   `json:"url"`            // URL to fetch the OpenAPI spec
+	Title          string   `json:"title"`          // Display title
+	Version        string   `json:"version"`        // API version
+	Description    string   `json:"description"`    // API description
+	ResourceType   string   `json:"resourceType"`   // Type of resource (e.g., Service, Deployment)
+	ResourceName   string   `json:"resourceName"`   // Name of the Kubernetes resource
+	Namespace      string   `json:"namespace"`      // Kubernetes namespace
+	LastUpdated    string   `json:"lastUpdated"`    // Last update timestamp
+	AllowedMethods []string `json:"allowedMethods"` // Allowed HTTP methods for Swagger UI
 }
 
 // Server serves the Swagger UI and aggregated OpenAPI specs
@@ -58,14 +59,15 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 		}
 
 		metadata := APIMetadata{
-			Name:         api.Name,
-			URL:          api.URL,
-			Title:        api.Name,
-			Description:  fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
-			ResourceType: api.ResourceType,
-			ResourceName: api.ResourceName,
-			Namespace:    api.Namespace,
-			LastUpdated:  api.LastUpdated,
+			Name:           api.Name,
+			URL:            api.URL,
+			Title:          api.Name,
+			Description:    fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
+			ResourceType:   api.ResourceType,
+			ResourceName:   api.ResourceName,
+			Namespace:      api.Namespace,
+			LastUpdated:    api.LastUpdated,
+			AllowedMethods: api.AllowedMethods,
 		}
 
 		newSpecs[api.Name] = metadata

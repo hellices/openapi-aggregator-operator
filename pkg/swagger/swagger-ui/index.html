@@ -250,9 +250,13 @@
                         throw new Error(`Failed to fetch spec: ${response.status}`);
                     }
                     const spec = await response.json();
+                    const api = state.apiSpecs[apiName];
                     
                     // 이전 UI 초기화
                     elements.swaggerContainer.innerHTML = '';
+                    
+                    // Get allowed methods from API info
+                    const allowedMethods = api.allowedMethods || [];
                     
                     // 새로운 SwaggerUI 인스턴스 생성
                     state.swaggerUI = SwaggerUIBundle({
@@ -265,6 +269,7 @@
                             SwaggerUIBundle.presets.apis,
                             SwaggerUIStandalonePreset
                         ],
+                        supportedSubmitMethods: api.allowedMethods || [], // Use allowed methods from API info
                         plugins: [
                             SwaggerUIBundle.plugins.DownloadUrl
                         ],
