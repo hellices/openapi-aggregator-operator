@@ -4,20 +4,20 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  GO_VERSION: '1.22'
+
 jobs:
-  build:
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  test:
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
     - name: Install dependencies
@@ -25,15 +25,29 @@ jobs:
         go mod download
         go mod verify
 
-    - name: Build
-      run: |
-        GOARCH=${{ matrix.arch }} make build
-        
     - name: Run tests
       run: make test
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
       with:
-        name: manager-${{ matrix.arch }}
-        path: bin/manager-${{ matrix.arch }}
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Build for ${{ matrix.arch }}
+      run: |
+        GOARCH=${{ matrix.arch }} make build
+        mv bin/manager bin/manager-${{ matrix.arch }}

@@ -44,6 +44,10 @@ type OpenAPIAggregatorSpec struct {
 	// PortAnnotation is the annotation key for OpenAPI port
 	// +kubebuilder:default="openapi.aggregator.io/port"
 	PortAnnotation string `json:"portAnnotation,omitempty"`
+
+	// AllowedMethodsAnnotation is the annotation key for allowed HTTP methods in Swagger UI
+	// +kubebuilder:default="openapi.aggregator.io/allowed-methods"
+	AllowedMethodsAnnotation string `json:"allowedMethodsAnnotation,omitempty"`
 }
 
 // OpenAPIAggregatorStatus defines the observed state of OpenAPIAggregator
@@ -83,6 +87,9 @@ type APIInfo struct {
 
 	// Annotations stores relevant annotations from the resource
 	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// AllowedMethods stores the allowed HTTP methods for Swagger UI
+	AllowedMethods []string `json:"allowedMethods,omitempty"`
 }
 
 //+kubebuilder:object:root=true

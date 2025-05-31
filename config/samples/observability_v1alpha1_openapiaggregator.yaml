@@ -8,3 +8,4 @@ spec:
   swaggerAnnotation: "openapi.aggregator.io/swagger"
   pathAnnotation: "openapi.aggregator.io/path"
   portAnnotation: "openapi.aggregator.io/port"
+  allowedMethodsAnnotation: "openapi.aggregator.io/allowed-methods"

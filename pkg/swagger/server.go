@@ -1,3 +1,4 @@
+// Package swagger provides a Swagger UI server for displaying OpenAPI specifications
 package swagger
 
 import (
@@ -5,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 
@@ -15,24 +18,32 @@ import (
 //go:embed swagger-ui/*
 var swaggerUI embed.FS
 
+// APIMetadata represents metadata about an OpenAPI specification
 type APIMetadata struct {
-	Name        string
-	URL         string
-	Title       string
-	Version     string
-	Description string
+	Name           string   `json:"name"`           // API name
+	URL            string   `json:"url"`            // URL to fetch the OpenAPI spec
+	Title          string   `json:"title"`          // Display title
+	Version        string   `json:"version"`        // API version
+	Description    string   `json:"description"`    // API description
+	ResourceType   string   `json:"resourceType"`   // Type of resource (e.g., Service, Deployment)
+	ResourceName   string   `json:"resourceName"`   // Name of the Kubernetes resource
+	Namespace      string   `json:"namespace"`      // Kubernetes namespace
+	LastUpdated    string   `json:"lastUpdated"`    // Last update timestamp
+	AllowedMethods []string `json:"allowedMethods"` // Allowed HTTP methods for Swagger UI
 }
 
 // Server serves the Swagger UI and aggregated OpenAPI specs
 type Server struct {
-	specs    map[string]APIMetadata
-	specsMux sync.RWMutex
+	specs    map[string]APIMetadata // Map of API name to metadata
+	specsMux sync.RWMutex           // Mutex for thread-safe access to specs
+	basePath string                 // Base path for the server (for Ingress/Route support)
 }
 
 // NewServer creates a new Swagger UI server
 func NewServer() *Server {
 	return &Server{
-		specs: make(map[string]APIMetadata),
+		specs:    make(map[string]APIMetadata),
+		basePath: os.Getenv("SWAGGER_BASE_PATH"),
 	}
 }
 
@@ -41,68 +52,54 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 	s.specsMux.Lock()
 	defer s.specsMux.Unlock()
 
-	fmt.Printf("Updating specs with %d APIs\n", len(apis))
-
 	newSpecs := make(map[string]APIMetadata)
 	for _, api := range apis {
-		fmt.Printf("Processing API %s (URL: %s, Error: %s)\n", api.Name, api.URL, api.Error)
+		// Skip APIs with errors
 		if api.Error != "" {
 			continue
 		}
 
-		// Store only metadata
 		metadata := APIMetadata{
-			Name:        api.Name,
-			URL:         api.URL,
-			Title:       api.Name,
-			Description: fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
+			Name:           api.Name,
+			URL:            api.URL,
+			Title:          api.Name,
+			Description:    fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
+			ResourceType:   api.ResourceType,
+			ResourceName:   api.ResourceName,
+			Namespace:      api.Namespace,
+			LastUpdated:    api.LastUpdated,
+			AllowedMethods: api.AllowedMethods,
 		}
 
 		newSpecs[api.Name] = metadata
-		fmt.Printf("Added metadata for %s\n", api.Name)
 	}
-	fmt.Printf("Total APIs processed: %d\n", len(newSpecs))
 	s.specs = newSpecs
 }
 
-// fetchSpec fetches the OpenAPI spec from a service URL
-func (s *Server) fetchSpec(url string) (map[string]interface{}, error) {
-	fmt.Printf("Fetching OpenAPI spec from URL: %s\n", url)
-
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch spec: %v", err)
+// stripBasePath removes the base path prefix from the request path
+func (s *Server) stripBasePath(path string) string {
+	if s.basePath != "" && strings.HasPrefix(path, s.basePath) {
+		return strings.TrimPrefix(path, s.basePath)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("Error closing response body: %v\n", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("service returned status code: %d", resp.StatusCode)
-	}
-
-	var spec map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&spec); err != nil {
-		return nil, fmt.Errorf("failed to decode spec: %v", err)
-	}
-
-	fmt.Printf("Successfully fetched and decoded OpenAPI spec from %s\n", url)
-	return spec, nil
+	return path
 }
 
 // serveIndex serves the Swagger UI index page
 func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	indexContent, err := swaggerUI.ReadFile("swagger-ui/index.html")
 	if err != nil {
-		fmt.Printf("Failed to read index.html: %v\n", err)
 		http.Error(w, "Failed to read index.html", http.StatusInternalServerError)
 		return
 	}
+
+	// Add base path meta tag
+	htmlContent := string(indexContent)
+	metaTag := fmt.Sprintf(`<meta name="base-path" content="%s">`, s.basePath)
+	htmlContent = strings.Replace(htmlContent, "</head>", metaTag+"</head>", 1)
+
 	w.Header().Set("Content-Type", "text/html")
-	if _, err := w.Write(indexContent); err != nil {
-		fmt.Printf("Error writing index content: %v\n", err)
+	if _, err := w.Write([]byte(htmlContent)); err != nil {
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
 	}
 }
 
@@ -112,7 +109,9 @@ func (s *Server) serveSpecs(w http.ResponseWriter, r *http.Request) {
 	defer s.specsMux.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.specs)
+	if err := json.NewEncoder(w).Encode(s.specs); err != nil {
+		http.Error(w, "Failed to encode specs", http.StatusInternalServerError)
+	}
 }
 
 // serveIndividualSpec serves individual OpenAPI spec by fetching it in real-time
@@ -129,15 +128,23 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch the spec in real-time
-	resp, err := http.Get(metadata.URL)
-	// for test
-	// fmt.Printf("Metadata for %s: %+v, exists: %v\n", apiName, metadata, exists)
-	// resp, err := http.Get("https://petstore.swagger.io/v2/swagger.json")
+	url := metadata.URL
+	if os.Getenv("DEV_MODE") == "true" {
+		// In development mode, rewrite any cluster URLs to localhost:8080
+		if strings.Contains(url, ".svc.cluster.local:8080") {
+			url = "http://localhost:8080" + strings.Split(url, ".svc.cluster.local:8080")[1]
+		}
+	}
+	resp, err := http.Get(url)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec, status: %d", resp.StatusCode), resp.StatusCode)
@@ -145,48 +152,58 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		http.Error(w, "Failed to copy response", http.StatusInternalServerError)
+	}
 }
 
 // serveStaticFiles serves embedded static files
 func (s *Server) serveStaticFiles(w http.ResponseWriter, r *http.Request) {
-	// For other paths, try to serve from embedded files
-	// First try assets subdirectory for static files
-	var content []byte
-	var err error
+	path := s.stripBasePath(r.URL.Path)
 
-	content, err = swaggerUI.ReadFile("swagger-ui/assets" + r.URL.Path)
+	// First try assets subdirectory for static files
+	content, err := swaggerUI.ReadFile("swagger-ui/assets" + path)
 	if err != nil {
 		// If not found in assets, try the root swagger-ui directory
-		content, err = swaggerUI.ReadFile("swagger-ui" + r.URL.Path)
+		content, err = swaggerUI.ReadFile("swagger-ui" + path)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 	}
 
-	// Set content type based on file extension
-	switch {
-	case strings.HasSuffix(r.URL.Path, ".css"):
-		w.Header().Set("Content-Type", "text/css")
-	case strings.HasSuffix(r.URL.Path, ".js"):
-		w.Header().Set("Content-Type", "application/javascript")
-	case strings.HasSuffix(r.URL.Path, ".png"):
-		w.Header().Set("Content-Type", "image/png")
-	case strings.HasSuffix(r.URL.Path, ".html"):
-		w.Header().Set("Content-Type", "text/html")
-	}
+	// Set appropriate content type based on file extension
+	contentType := s.getContentType(path)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600") // Add caching for static files
 
 	if _, err := w.Write(content); err != nil {
-		fmt.Printf("Error writing content: %v\n", err)
+		http.Error(w, "Failed to write response", http.StatusInternalServerError)
+	}
+}
+
+// getContentType determines the content type based on file extension
+func (s *Server) getContentType(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".css"):
+		return "text/css"
+	case strings.HasSuffix(path, ".js"):
+		return "application/javascript"
+	case strings.HasSuffix(path, ".png"):
+		return "image/png"
+	case strings.HasSuffix(path, ".html"):
+		return "text/html"
+	default:
+		return "application/octet-stream"
 	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Set common headers
+	// Set common headers with more permissive CORS
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Length")
 
 	// Handle OPTIONS requests for CORS
 	if r.Method == "OPTIONS" {
@@ -194,18 +211,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Strip base path if configured
+	path := s.stripBasePath(r.URL.Path)
+
 	// Route to appropriate handler
 	switch {
-	case r.URL.Path == "/" || r.URL.Path == "/index.html":
+	case path == "/" || path == "/index.html":
 		s.serveIndex(w, r)
-	case r.URL.Path == "/swagger-specs":
+	case path == "/swagger-specs":
 		s.serveSpecs(w, r)
-	case strings.HasPrefix(r.URL.Path, "/swagger-specs/"):
+	case strings.HasPrefix(path, "/api/"):
 		s.serveIndividualSpec(w, r)
 	default:
 		s.serveStaticFiles(w, r)
 	}
 }
+
+//TODO: swagger에서 보내는 요청을 모두 server.go로 리다이렉트하는 기능 추가. 서버는 이걸 받아서 proxy 요청을 보내는 기능을 구현해야 함.
 
 // Start starts the Swagger UI server
 func (s *Server) Start(port int) error {
