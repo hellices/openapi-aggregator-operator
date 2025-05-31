@@ -15,6 +15,7 @@ RUN go mod download
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/controller/ internal/controller/
+COPY pkg/ pkg/
 
 # Build
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
@@ -31,6 +32,8 @@ RUN if [ "${TARGETARCH}" = "arm64" ]; then \
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/manager .
+# Copy Swagger UI static files
+COPY --from=builder /workspace/pkg/swagger/swagger-ui/ /swagger-ui/
 # Copy qemu-user-static if building for arm64
 COPY --from=builder /qemu-user-static/ /usr/bin/
 USER 65532:65532
