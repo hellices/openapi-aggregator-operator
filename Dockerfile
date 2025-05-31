@@ -17,8 +17,11 @@ COPY api/ api/
 COPY internal/controller/ internal/controller/
 COPY pkg/ pkg/
 
-# Build architecture-specific binary
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager_${TARGETARCH} cmd/main.go
+# Get version info from build arg
+ARG VERSION
+
+# Build architecture-specific binary with version info
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -ldflags "-s -w -X github.com/hellices/openapi-aggregator-operator/pkg/version.version=${VERSION} -X github.com/hellices/openapi-aggregator-operator/pkg/version.buildDate=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" -a -o manager_${TARGETARCH} cmd/main.go
 
 # Get CA certificates from alpine for secure communication
 FROM alpine:3.21 AS certificates
