@@ -17,6 +17,18 @@ Kubernetes operator that discovers and aggregates OpenAPI/Swagger specifications
 - 📝 **Service Information**: Displays service metadata including namespace and resource type
 - ⚡ **Zero-config Services**: Works with any service that exposes an OpenAPI/Swagger specification
 
+## Version Management
+
+The operator uses semantic versioning managed through `versions.txt`. The version number is used consistently across:
+- Docker image tags (e.g., `ghcr.io/hellices/openapi-aggregator-operator:0.1.0`)
+- Release tags
+- Binary version information
+
+To update the version:
+1. Edit the version in `versions.txt`
+2. Build and push new image: `make docker-build docker-push`
+3. Deploy the operator: `make deploy`
+
 ## Installation
 
 ```bash
@@ -100,7 +112,7 @@ The operator consists of two main components:
 ## Development
 
 Requirements:
-- Go 1.21+
+- Go 1.22+
 - Kubernetes 1.24+
 - kubectl
 - kustomize
@@ -113,12 +125,17 @@ make run
 # Run tests
 make test
 
-# Build container image
-make docker-build
+# Build and push container image (uses version from versions.txt)
+make docker-build docker-push
 
 # Generate manifests
 make manifests
 ```
+
+Version information is managed in `versions.txt`. When building locally:
+- The version from `versions.txt` is used by default
+- Git tags take precedence if they exist
+- Image tags follow the format: `ghcr.io/hellices/openapi-aggregator-operator:<version>`
 
 ## Contributing
 
