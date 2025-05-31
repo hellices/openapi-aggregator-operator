@@ -130,6 +130,9 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch the spec in real-time
 	resp, err := http.Get(metadata.URL)
+	// for test
+	// fmt.Printf("Metadata for %s: %+v, exists: %v\n", apiName, metadata, exists)
+	// resp, err := http.Get("https://petstore.swagger.io/v2/swagger.json")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec: %v", err), http.StatusInternalServerError)
 		return

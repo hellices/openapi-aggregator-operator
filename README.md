@@ -1,87 +1,129 @@
 # OpenAPI Aggregator Operator
 
-🚧 **현재 개발 진행 중입니다** 🚧
+[![Go Report Card](https://goreportcard.com/badge/github.com/hellices/openapi-aggregator-operator)](https://goreportcard.com/report/github.com/hellices/openapi-aggregator-operator)
+[![GitHub License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/hellices/openapi-aggregator-operator)](go.mod)
+[![Docker Pulls](https://img.shields.io/docker/pulls/hellices/openapi-aggregator-operator)](https://hub.docker.com/r/hellices/openapi-aggregator-operator)
+[![Release](https://img.shields.io/github/v/release/hellices/openapi-aggregator-operator)](https://github.com/hellices/openapi-aggregator-operator/releases)
 
-## 프로젝트 소개
-Kubernetes 클러스터 내의 서비스들의 OpenAPI 스펙을 자동으로 수집하고 통합하여 보여주는 Operator입니다.
+Kubernetes operator that discovers and aggregates OpenAPI/Swagger specifications from services running in your cluster. It provides a unified Swagger UI interface to browse and test all your APIs in one place.
 
-## 주요 기능
-- 라벨 셀렉터를 통한 서비스 자동 발견
-- OpenAPI 스펙 실시간 수집
-- Swagger UI를 통한 통합 문서 제공
-- 네임스페이스 기반 필터링 지원
+## Features
 
-## 프로젝트 구조
-```
-.
-├── api/                   # CRD API 정의
-├── cmd/                   # operator 메인 엔트리포인트
-├── internal/              # 컨트롤러 구현
-├── pkg/                   # 재사용 가능한 패키지
-│   └── swagger/          # Swagger UI 서버
-└── config/               # Kubernetes 매니페스트
-    ├── crd/              # CRD 정의
-    ├── rbac/             # 권한 설정
-    └── manager/          # operator 배포 설정
-```
+- 🔍 **Auto-discovery**: Automatically finds services with OpenAPI specifications using annotations
+- 🔄 **Real-time Updates**: Fetches specifications in real-time and updates every 10 seconds
+- 🎯 **Configurable Endpoints**: Customize OpenAPI spec paths and ports through annotations
+- 🌐 **Unified UI**: Single Swagger UI interface to browse all discovered APIs
+- 📝 **Service Information**: Displays service metadata including namespace and resource type
+- ⚡ **Zero-config Services**: Works with any service that exposes an OpenAPI/Swagger specification
 
-## 개발 환경 설정
+## Installation
+
 ```bash
-# 필요한 도구 설치
-make install-tools
+# Clone the repository
+git clone https://github.com/hellices/openapi-aggregator-operator
+cd openapi-aggregator-operator
 
-# CRD 설치
+# Install the CRD
 make install
 
-# operator 실행
-make run
+# Deploy the operator
+make deploy
 ```
 
-## 사용 예시
+## Usage
+
+### 1. Add OpenAPI Annotations to Your Services
+
+Add the following annotations to your Kubernetes services that expose OpenAPI/Swagger specifications:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-service
+  annotations:
+    openapi.aggregator.io/swagger: "true"                 # Required: Enable OpenAPI aggregation
+    openapi.aggregator.io/path: "/v2/api-docs"           # Optional: Custom path to OpenAPI spec (default: /v2/api-docs)
+    openapi.aggregator.io/port: "8080"                   # Optional: Port number (default: 8080)
+spec:
+  ports:
+    - port: 8080
+  selector:
+    app: example-service
+```
+
+### 2. Create OpenAPIAggregator Resource
+
+Create an instance of the OpenAPIAggregator custom resource:
+
 ```yaml
 apiVersion: observability.aggregator.io/v1alpha1
 kind: OpenAPIAggregator
 metadata:
-  name: example-aggregator
+  name: openapi-aggregator
 spec:
-  defaultPath: "/v3/api-docs"    # OpenAPI 문서의 기본 경로
-  defaultPort: "8080"            # OpenAPI 문서를 제공하는 기본 포트
-  displayNamePrefix: "API-"      # Swagger UI에 표시될 서비스 이름 접두사
-  labelSelector:
-    app: myapp
-  pathAnnotation: "openapi.aggregator.io/path"    # 경로 override를 위한 annotation 키
-  portAnnotation: "openapi.aggregator.io/port"    # 포트 override를 위한 annotation 키
-  ignoreAnnotations: false       # annotation 무시 여부 (true면 기본값만 사용)
+  labelSelector: {}                                       # Optional: Filter services by labels
+  swaggerAnnotation: "openapi.aggregator.io/swagger"     # Required: Annotation to identify OpenAPI services
+  pathAnnotation: "openapi.aggregator.io/path"           # Optional: Annotation for custom paths
+  portAnnotation: "openapi.aggregator.io/port"           # Optional: Annotation for custom ports
+  defaultPath: "/v2/api-docs"                            # Default path if not specified in annotations
+  defaultPort: "8080"                                    # Default port if not specified in annotations
 ```
 
-### Annotation을 통한 커스터마이징
-각 서비스의 Deployment나 StatefulSet에서 annotation을 통해 OpenAPI 경로와 포트를 개별적으로 지정할 수 있습니다:
+### 3. Access the Swagger UI
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: my-service
-  annotations:
-    openapi.aggregator.io/path: "/swagger/api-docs"  # 기본 경로 대신 사용할 경로
-    openapi.aggregator.io/port: "9090"               # 기본 포트 대신 사용할 포트
-spec:
-  # ...
+The operator runs a Swagger UI server on port 9090. You can access it through:
+
+```bash
+# Port forward the operator's Swagger UI
+kubectl port-forward deployment/openapi-aggregator-operator-controller-manager 9090:9090 -n openapi-aggregator-system
+
+# Open in your browser
+open http://localhost:9090
 ```
 
-이를 통해:
-- 대부분의 서비스는 OpenAPIAggregator에 설정된 기본값을 사용
-- 필요한 서비스만 annotation으로 개별 설정 가능
-- `ignoreAnnotations: true` 설정으로 모든 서비스에 기본값 강제 적용 가능
+## Architecture
 
-## 현재 개발 상태
-- [x] 기본 Operator 구조 구현
-- [x] OpenAPI 스펙 수집 로직 구현
-- [x] Swagger UI 통합
-- [x] 실시간 스펙 조회 기능
-- [ ] 인증/인가 기능 추가
-- [ ] 메트릭스 수집 추가
-- [ ] 고가용성 지원
+The operator consists of two main components:
 
-## 라이선스
-Apache License 2.0
+1. **Controller**: 
+   - Watches for services with OpenAPI annotations
+   - Collects service metadata and OpenAPI spec URLs
+   - Updates status every 10 seconds
+
+2. **Swagger UI Server**: 
+   - Serves unified Swagger UI interface
+   - Fetches OpenAPI specs in real-time
+   - Provides API selection and documentation
+
+## Development
+
+Requirements:
+- Go 1.21+
+- Kubernetes 1.24+
+- kubectl
+- kustomize
+- controller-gen
+
+```bash
+# Run locally
+make run
+
+# Run tests
+make test
+
+# Build container image
+make docker-build
+
+# Generate manifests
+make manifests
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

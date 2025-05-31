@@ -10,48 +10,99 @@
         body {
             margin: 0;
             padding: 0;
+            background: #fafafa;
         }
         #swagger-ui {
             max-width: 1460px;
             margin: 0 auto;
             padding: 20px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
         }
         .swagger-ui .topbar {
-            background: #1a237e;
+            background: #1b1b1b;
             padding: 10px 0;
         }
+        .api-selector-wrapper {
+            background: #1b1b1b;
+            padding: 30px 0 10px;
+            margin-bottom: 30px;
+        }
         .api-selector {
-            background: white;
-            padding: 10px 20px;
-            border-radius: 4px;
-            margin: 10px auto;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
             max-width: 1460px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        .api-selector-title {
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            font-family: sans-serif;
+        }
+        .api-selector-subtitle {
+            color: rgba(255,255,255,0.7);
+            font-size: 14px;
+            margin-bottom: 20px;
+            font-family: sans-serif;
         }
         .api-selector select {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
+            padding: 10px 32px 10px 12px;
+            border: 1px solid #50555e;
             border-radius: 4px;
-            background: white;
+            background: #1b1b1b;
+            color: #fff;
+            font-family: sans-serif;
             font-size: 14px;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 20px;
+        }
+        .api-selector select:hover {
+            border-color: #89bf04;
+            background-color: #222;
+        }
+        .api-selector select:focus {
+            outline: none;
+            border-color: #89bf04;
+            box-shadow: 0 0 0 1px #89bf04;
+        }
+        .api-selector select option {
+            background: #1b1b1b;
+            color: #fff;
+            padding: 8px;
         }
         .api-info {
             margin-top: 10px;
-            font-size: 12px;
-            color: #666;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 4px;
+            color: rgba(255,255,255,0.7);
+            font-family: sans-serif;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .api-info div {
+            margin: 4px 0;
+        }
+        .swagger-ui .info {
+            margin: 20px 0;
         }
         </style>
 </head>
 <body>
-    <div class="api-selector">
-        <select id="apiSelector" onchange="loadSelectedAPI()">
-            <option value="">Loading APIs...</option>
-        </select>
-        <div id="apiInfo" class="api-info"></div>
+    <div class="api-selector-wrapper">
+        <div class="api-selector">
+            <h1 class="api-selector-title">OpenAPI Specifications</h1>
+            <div class="api-selector-subtitle">Select an API service to view its documentation</div>
+            <select id="apiSelector" onchange="loadSelectedAPI()">
+                <option value="">Loading APIs...</option>
+            </select>
+            <div id="apiInfo" class="api-info"></div>
+        </div>
     </div>
     <div id="swagger-ui"></div>
     <script src="./assets/swagger-ui-bundle.js"></script>
