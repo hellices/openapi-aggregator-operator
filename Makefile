@@ -189,7 +189,8 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	# Build and push multi-platform images
 	docker buildx build \
 		--platform $(PLATFORMS) \
-		--build-arg VERSION=$(VERSION) \
+		--build-arg VERSION=$(shell git describe --tags --always) \
+		--build-arg BUILD_DATE=$(shell date -u +%Y-%m-%dT%H:%M:%SZ) \
 		--build-arg BUILDKIT_CONTEXT_KEEP_GIT_DIR=1 \
 		--tag ${IMG} \
 		--push \
