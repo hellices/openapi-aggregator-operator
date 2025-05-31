@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -158,30 +157,34 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 	return apiInfo
 }
 
-// checkAPIHealth verifies if the OpenAPI endpoint is accessible
-func (r *OpenAPIAggregatorReconciler) checkAPIHealth(ctx context.Context, apiInfo *observabilityv1alpha1.APIInfo) {
-	logger := log.FromContext(ctx).V(1)
+// // checkAPIHealth verifies if the OpenAPI endpoint is accessible
+// func (r *OpenAPIAggregatorReconciler) checkAPIHealth(ctx context.Context, apiInfo *observabilityv1alpha1.APIInfo) {
+// 	logger := log.FromContext(ctx).V(1)
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(apiInfo.URL)
-	if err != nil {
-		logger.V(1).Info("API health check failed", "name", apiInfo.Name, "error", err)
-		apiInfo.Error = fmt.Sprintf("Failed to access OpenAPI endpoint: %v", err)
-		return
-	}
-	defer resp.Body.Close()
+// 	client := &http.Client{Timeout: 5 * time.Second}
+// 	resp, err := client.Get(apiInfo.URL)
+// 	if err != nil {
+// 		logger.V(1).Info("API health check failed", "name", apiInfo.Name, "error", err)
+// 		apiInfo.Error = fmt.Sprintf("Failed to access OpenAPI endpoint: %v", err)
+// 		return
+// 	}
+// 	defer func() {
+// 		if err := resp.Body.Close(); err != nil {
+// 			logger.Error(err, "Failed to close response body")
+// 		}
+// 	}()
 
-	if resp.StatusCode != http.StatusOK {
-		logger.V(1).Info("API health check failed",
-			"name", apiInfo.Name,
-			"statusCode", resp.StatusCode)
-		apiInfo.Error = fmt.Sprintf("OpenAPI endpoint returned non-200 status: %d", resp.StatusCode)
-		return
-	}
+// 	if resp.StatusCode != http.StatusOK {
+// 		logger.V(1).Info("API health check failed",
+// 			"name", apiInfo.Name,
+// 			"statusCode", resp.StatusCode)
+// 		apiInfo.Error = fmt.Sprintf("OpenAPI endpoint returned non-200 status: %d", resp.StatusCode)
+// 		return
+// 	}
 
-	logger.V(2).Info("API health check successful", "name", apiInfo.Name)
-	apiInfo.Error = ""
-}
+// 	logger.V(2).Info("API health check successful", "name", apiInfo.Name)
+// 	apiInfo.Error = ""
+// }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
