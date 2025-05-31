@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
@@ -191,9 +192,9 @@ func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 		}()
 	}
-	
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&observabilityv1alpha1.OpenAPIAggregator{}).
-		Watches(&corev1.Service{}, &ctrl.EnqueueRequestForObject{}).
+		Watches(&corev1.Service{}, &handler.EnqueueRequestForObject{}).
 		Complete(r)
 }

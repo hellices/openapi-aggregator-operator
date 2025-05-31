@@ -1,15 +1,19 @@
 # Common variables and settings
-VERSION ?= $(shell git describe --tags)
 ARCH ?= $(shell go env GOARCH)
 GOOS ?= linux
 PLATFORMS ?= linux/arm64,linux/amd64
 
-# VERSION_PKG is where version info is stored in the code
+# Version information
+GIT_VERSION ?= $(shell git describe --tags --always)
+FILE_VERSION ?= $(shell awk -F= '/^operator=/ {print $$2}' versions.txt)
+# Use git version if available, otherwise fall back to versions.txt
+VERSION ?= $(if $(shell git describe --tags --exact-match 2>/dev/null),$(GIT_VERSION),$(FILE_VERSION))
+VERSION_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 VERSION_PKG ?= github.com/hellices/openapi-aggregator-operator/pkg/version
 
 # LDFLAGS for the build
 COMMON_LDFLAGS ?= -s -w
-OPERATOR_LDFLAGS ?= -X ${VERSION_PKG}.version=${VERSION} -X ${VERSION_PKG}.buildDate=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+OPERATOR_LDFLAGS ?= -X ${VERSION_PKG}.version=${VERSION} -X ${VERSION_PKG}.buildDate=${VERSION_DATE}
 ifneq ($(origin CHANNELS), undefined)
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
 endif
@@ -165,7 +169,8 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	docker build \
-		--build-arg VERSION=$(VERSION) \
+		--build-arg VERSION=${VERSION} \
+		--build-arg BUILD_DATE=${VERSION_DATE} \
 		--build-arg TARGETOS=$(GOOS) \
 		--build-arg TARGETARCH=$(ARCH) \
 		-t ${IMG} \

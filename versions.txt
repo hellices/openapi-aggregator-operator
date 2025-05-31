@@ -1,0 +1,5 @@
+# This file contains the version information for OpenAPI Aggregator Operator
+# The version numbers are used during the build process
+
+# Represents the current release of the OpenAPI Aggregator Operator
+operator=0.1.0
