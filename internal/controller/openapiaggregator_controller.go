@@ -139,14 +139,12 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 		Namespace:    svc.Namespace,
 		Path:         path,
 		Port:         port,
-		// URL:          fmt.Sprintf("http://%s.%s.svc.cluster.local:%s%s", svc.Name, svc.Namespace, port, path),
-		URL:         fmt.Sprintf("http://%s:%s%s", svc.Spec.ClusterIP, port, path),
-		LastUpdated: time.Now().Format(time.RFC3339),
-		Annotations: svc.Annotations,
+		URL:          fmt.Sprintf("http://%s.%s.svc.cluster.local:%s%s", svc.Name, svc.Namespace, port, path),
+		LastUpdated:  time.Now().Format(time.RFC3339),
+		Annotations:  svc.Annotations,
 	}
 
-	// Check if the OpenAPI endpoint is accessible
-
+	// Enable health check to validate accessibility
 	// TODO: Uncomment this line for production use
 	// r.checkAPIHealth(ctx, apiInfo)
 

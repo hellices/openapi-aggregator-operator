@@ -16,11 +16,15 @@ import (
 var swaggerUI embed.FS
 
 type APIMetadata struct {
-	Name        string
-	URL         string
-	Title       string
-	Version     string
-	Description string
+	Name         string `json:"name"`
+	URL          string `json:"url"`
+	Title        string `json:"title"`
+	Version      string `json:"version"`
+	Description  string `json:"description"`
+	ResourceType string `json:"resourceType"`
+	ResourceName string `json:"resourceName"`
+	Namespace    string `json:"namespace"`
+	LastUpdated  string `json:"lastUpdated"`
 }
 
 // Server serves the Swagger UI and aggregated OpenAPI specs
@@ -41,25 +45,24 @@ func (s *Server) UpdateSpecs(apis []observabilityv1alpha1.APIInfo) {
 	s.specsMux.Lock()
 	defer s.specsMux.Unlock()
 
-	fmt.Printf("Updating specs with %d APIs\n", len(apis))
-
 	newSpecs := make(map[string]APIMetadata)
 	for _, api := range apis {
-		fmt.Printf("Processing API %s (URL: %s, Error: %s)\n", api.Name, api.URL, api.Error)
 		if api.Error != "" {
 			continue
 		}
 
-		// Store only metadata
 		metadata := APIMetadata{
-			Name:        api.Name,
-			URL:         api.URL,
-			Title:       api.Name,
-			Description: fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
+			Name:         api.Name,
+			URL:          api.URL,
+			Title:        api.Name,
+			Description:  fmt.Sprintf("API from %s/%s", api.Namespace, api.ResourceName),
+			ResourceType: api.ResourceType,
+			ResourceName: api.ResourceName,
+			Namespace:    api.Namespace,
+			LastUpdated:  api.LastUpdated,
 		}
 
 		newSpecs[api.Name] = metadata
-		fmt.Printf("Added metadata for %s\n", api.Name)
 	}
 	fmt.Printf("Total APIs processed: %d\n", len(newSpecs))
 	s.specs = newSpecs

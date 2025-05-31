@@ -47,7 +47,25 @@
             margin-bottom: 20px;
             font-family: sans-serif;
         }
-        .api-selector select {
+        .selector-container {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        .selector-group {
+            flex: 1;
+        }
+        .selector-group label {
+            display: block;
+            color: rgba(255,255,255,0.7);
+            margin-bottom: 5px;
+            font-size: 12px;
+            font-family: sans-serif;
+        }
+        .api-selector .select-container {
+            position: relative;
+        }
+        .api-selector .select-container input {
             width: 100%;
             padding: 10px 32px 10px 12px;
             border: 1px solid #50555e;
@@ -56,13 +74,19 @@
             color: #fff;
             font-family: sans-serif;
             font-size: 14px;
-            appearance: none;
-            -webkit-appearance: none;
-            -moz-appearance: none;
             background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
             background-repeat: no-repeat;
             background-position: right 10px center;
             background-size: 20px;
+        }
+        .api-selector .select-container input:hover {
+            border-color: #89bf04;
+            background-color: #222;
+        }
+        .api-selector .select-container input:focus {
+            outline: none;
+            border-color: #89bf04;
+            box-shadow: 0 0 0 1px #89bf04;
         }
         .api-selector select:hover {
             border-color: #89bf04;
@@ -97,10 +121,26 @@
     <div class="api-selector-wrapper">
         <div class="api-selector">
             <h1 class="api-selector-title">OpenAPI Specifications</h1>
-            <div class="api-selector-subtitle">Select an API service to view its documentation</div>
-            <select id="apiSelector" onchange="loadSelectedAPI()">
-                <option value="">Loading APIs...</option>
-            </select>
+            <div class="api-selector-subtitle">Select a namespace and service to view its documentation</div>
+            <div class="selector-container">
+                <div class="selector-group">
+                    <label>Namespace</label>
+                    <div class="select-container">
+                        <input type="text" id="namespaceInput" list="namespaceList" placeholder="Select or type to filter namespaces..." oninput="handleNamespaceInput(this.value)">
+                        <datalist id="namespaceList">
+                            <option value="All Namespaces">
+                        </datalist>
+                    </div>
+                </div>
+                <div class="selector-group">
+                    <label>Service</label>
+                    <div class="select-container">
+                        <input type="text" id="serviceInput" list="serviceList" placeholder="Select or type to filter services..." oninput="handleServiceInput(this.value)">
+                        <datalist id="serviceList">
+                        </datalist>
+                    </div>
+                </div>
+            </div>
             <div id="apiInfo" class="api-info"></div>
         </div>
     </div>
@@ -110,25 +150,115 @@
     <script>
         let swaggerUI;
         let apiSpecs = {};
+        let currentApisByNamespace = {};
 
-        function updateAPISelector(specs) {
-            const selector = document.getElementById('apiSelector');
-            selector.innerHTML = '';
+        function updateNamespaceSelector(specs) {
+            currentApisByNamespace = {};
             
-            if (Object.keys(specs).length === 0) {
-                selector.innerHTML = '<option value="">No APIs available</option>';
+            // Group APIs by namespace
+            Object.keys(specs).forEach(name => {
+                const api = specs[name];
+                const namespace = api.namespace || 'unknown';
+                if (!currentApisByNamespace[namespace]) {
+                    currentApisByNamespace[namespace] = [];
+                }
+                currentApisByNamespace[namespace].push({name, ...api});
+            });
+
+            updateNamespaceDatalist();
+            updateServiceDatalist();
+        }
+
+        function updateNamespaceDatalist() {
+            const namespaceList = document.getElementById('namespaceList');
+            const namespaceInput = document.getElementById('namespaceInput');
+            const filterValue = namespaceInput.value.toLowerCase();
+            
+            namespaceList.innerHTML = '<option value="All Namespaces">';
+            
+            Object.keys(currentApisByNamespace)
+                .sort()
+                .filter(namespace => namespace.toLowerCase().includes(filterValue))
+                .forEach(namespace => {
+                    const option = document.createElement('option');
+                    option.value = namespace;
+                    namespaceList.appendChild(option);
+                });
+        }
+
+        function handleNamespaceInput(value) {
+            const normalizedValue = value.trim();
+            updateNamespaceDatalist();
+            updateServiceDatalist(normalizedValue);
+        }
+
+        function handleServiceInput(value) {
+            const normalizedValue = value.trim();
+            const namespaceValue = document.getElementById('namespaceInput').value;
+            
+            // Clear UI if no service is selected
+            if (!normalizedValue) {
+                if (swaggerUI) {
+                    swaggerUI.clear();
+                }
                 return;
             }
 
-            selector.innerHTML = '<option value="">Select an API...</option>';
-            Object.keys(specs).forEach(name => {
-                const api = specs[name];
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                selector.appendChild(option);
-            });
+            // Add a small delay to ensure the datalist selection is complete
+            setTimeout(() => {
+                const currentService = document.getElementById('serviceInput').value;
+                if (currentService) {
+                    console.log('Selected service:', currentService);
+                    loadSelectedAPI(currentService);
+                }
+            }, 100);
         }
+
+        function updateServiceDatalist(selectedNamespace) {
+            const serviceList = document.getElementById('serviceList');
+            const serviceInput = document.getElementById('serviceInput');
+            const filterValue = serviceInput.value.toLowerCase();
+            
+            serviceList.innerHTML = '';
+
+            if (!selectedNamespace) {
+                return;
+            }
+
+            let services = [];
+            const isAllNamespaces = selectedNamespace === 'All Namespaces';
+            
+            if (isAllNamespaces) {
+                Object.values(currentApisByNamespace).forEach(namespaceServices => {
+                    services = services.concat(namespaceServices);
+                });
+            } else {
+                services = currentApisByNamespace[selectedNamespace] || [];
+            }
+
+            services
+                .sort((a, b) => {
+                    if (isAllNamespaces) {
+                        const nsCompare = a.namespace.localeCompare(b.namespace);
+                        return nsCompare !== 0 ? nsCompare : a.name.localeCompare(b.name);
+                    }
+                    return a.name.localeCompare(b.name);
+                })
+                .filter(api => {
+                    const searchText = isAllNamespaces 
+                        ? `${api.namespace}/${api.name}` 
+                        : api.name;
+                    return !filterValue || searchText.toLowerCase().includes(filterValue);
+                })
+                .forEach(api => {
+                    const option = document.createElement('option');
+                    option.value = isAllNamespaces 
+                        ? `${api.namespace} / ${api.name}`
+                        : api.name;
+                    serviceList.appendChild(option);
+                });
+        }
+        
 
         function updateAPIInfo(apiName) {
             const infoDiv = document.getElementById('apiInfo');
@@ -138,20 +268,51 @@
             }
 
             const api = apiSpecs[apiName];
+            console.log('Updating API info for:', apiName, 'with data:', api);
             infoDiv.innerHTML = `
-                <div>Type: ${api.resourceType} | Name: ${api.resourceName}</div>
+                <div>Type: ${api.resourceType || 'Service'} | Service: ${api.name}</div>
                 <div>Namespace: ${api.namespace}</div>
-                <div>Last Updated: ${api.lastUpdated}</div>
+                <div>Last Updated: ${api.lastUpdated ? new Date(api.lastUpdated).toLocaleString() : 'Not available'}</div>
             `;
         }
 
-        function loadSelectedAPI() {
-            const selector = document.getElementById('apiSelector');
-            const selectedAPI = selector.value;
+        function loadSelectedAPI(selectedService) {
+            if (!selectedService) {
+                if (swaggerUI) {
+                    swaggerUI.clear();
+                }
+                return;
+            }
+
+            // Handle service names with namespace prefix
+            const parts = selectedService.split(' / ').map(part => part.trim());
+            let apiName = selectedService;
             
-            updateAPIInfo(selectedAPI);
+            // If we have namespace / service format, find the service in that namespace
+            if (parts.length > 1) {
+                const namespace = parts[0];
+                const serviceName = parts[1];
+                const servicesInNamespace = currentApisByNamespace[namespace] || [];
+                const service = servicesInNamespace.find(s => s.name === serviceName);
+                if (service) {
+                    apiName = service.name;
+                }
+            } else {
+                // Look for the service in the selected namespace
+                const selectedNamespace = document.getElementById('namespaceInput').value;
+                if (selectedNamespace && selectedNamespace !== 'All Namespaces') {
+                    const servicesInNamespace = currentApisByNamespace[selectedNamespace] || [];
+                    const service = servicesInNamespace.find(s => s.name === selectedService);
+                    if (service) {
+                        apiName = service.name;
+                    }
+                }
+            }
             
-            if (!selectedAPI || !apiSpecs[selectedAPI]) {
+            console.log('Loading API for service:', apiName);
+            updateAPIInfo(apiName);
+            
+            if (!apiSpecs[apiName]) {
                 if (swaggerUI) {
                     swaggerUI.clear();
                 }
@@ -159,7 +320,7 @@
             }
 
             // Fetch the spec from the API endpoint
-            fetch('/api/' + selectedAPI)
+            fetch('/api/' + apiName)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`Failed to fetch spec: ${response.status}`);
@@ -214,10 +375,7 @@
                     })
                     .then(specs => {
                         apiSpecs = specs;
-                        updateAPISelector(specs);
-                        
-                        // Just update the selector, we'll initialize SwaggerUI when an API is selected
-                        updateAPISelector(specs);
+                        updateNamespaceSelector(specs);
                     })
                     .catch(error => {
                         console.error('Error loading specs:', error);
