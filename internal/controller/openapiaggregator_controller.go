@@ -80,14 +80,15 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.Info("Processing service", "name", service.Name, "namespace", service.Namespace)
 
 		if apiInfo := r.processService(ctx, service, instance); apiInfo != nil {
-			logger.Info("Successfully collected API info", "service", service.Name, "url", apiInfo.URL)
+			logger.Info("Collected API info", "service", service.Name, "url", apiInfo.URL)
 			collectedAPIs = append(collectedAPIs, *apiInfo)
 		} else {
-			logger.Info("Service skipped", "name", service.Name, "namespace", service.Namespace)
+			logger.V(1).Info("Service skipped", "name", service.Name, "namespace", service.Namespace)
 		}
 	}
 
-	// Update status
+	// Simply update the status with the new list
+	// Any removed services will naturally be excluded
 	instance.Status.CollectedAPIs = collectedAPIs
 	if err := r.Status().Update(ctx, instance); err != nil {
 		logger.Error(err, "Failed to update OpenAPIAggregator status")
@@ -183,8 +184,8 @@ func (r *OpenAPIAggregatorReconciler) checkAPIHealth(ctx context.Context, apiInf
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Initialize Swagger UI server
-	r.swaggerServer = swagger.NewServer()
-	if !r.TestMode {
+	if r.swaggerServer == nil && !r.TestMode {
+		r.swaggerServer = swagger.NewServer()
 		go func() {
 			log.Log.Info("Starting Swagger UI server on HTTP port 9090")
 			if err := r.swaggerServer.Start(9090); err != nil {

@@ -3,8 +3,6 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/hellices/openapi-aggregator-operator)](https://goreportcard.com/report/github.com/hellices/openapi-aggregator-operator)
 [![GitHub License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/hellices/openapi-aggregator-operator)](go.mod)
-[![Docker Pulls](https://img.shields.io/docker/pulls/hellices/openapi-aggregator-operator)](https://hub.docker.com/r/hellices/openapi-aggregator-operator)
-[![Release](https://img.shields.io/github/v/release/hellices/openapi-aggregator-operator)](https://github.com/hellices/openapi-aggregator-operator/releases)
 
 Kubernetes operator that discovers and aggregates OpenAPI/Swagger specifications from services running in your cluster. It provides a unified Swagger UI interface to browse and test all your APIs in one place.
 
