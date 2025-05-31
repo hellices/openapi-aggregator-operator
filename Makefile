@@ -1,5 +1,5 @@
 # VERSION gets the version from the most recent git tag
-VERSION ?= $(shell git describe --tags | sed 's/^v//')
+VERSION ?= $(shell git describe --tags)
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
