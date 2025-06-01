@@ -25,6 +25,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -79,12 +81,22 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
-	// Simply update the status with the new list
-	// Any removed services will naturally be excluded
-	instance.Status.CollectedAPIs = collectedAPIs
-	if err := r.Status().Update(ctx, instance); err != nil {
-		logger.Error(err, "Failed to update OpenAPIAggregator status")
-		return ctrl.Result{}, err
+	// Update status with retry on conflict
+	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Get the latest version
+		latest := &observabilityv1alpha1.OpenAPIAggregator{}
+		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+			return err
+		}
+
+		// Update status
+		latest.Status.CollectedAPIs = collectedAPIs
+		return r.Status().Update(ctx, latest)
+	})
+
+	if retryErr != nil {
+		logger.Error(retryErr, "Failed to update OpenAPIAggregator status")
+		return ctrl.Result{}, retryErr
 	}
 
 	// Update Swagger UI with collected specs
@@ -102,7 +114,7 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 
 	// Check if the service has the required swagger annotation
 	if svc.Annotations[instance.Spec.SwaggerAnnotation] != "true" {
-		logger.Info("Skipping service - missing swagger annotation",
+		logger.V(2).Info("Skipping service - missing swagger annotation",
 			"service", svc.Name,
 			"namespace", svc.Namespace,
 			"requiredAnnotation", instance.Spec.SwaggerAnnotation)
@@ -201,6 +213,21 @@ func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&observabilityv1alpha1.OpenAPIAggregator{}).
-		Watches(&corev1.Service{}, &handler.EnqueueRequestForObject{}).
+		Watches(
+			&corev1.Service{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+				svc := obj.(*corev1.Service)
+				// 서비스에 swagger 관련 어노테이션이 있는 경우에만 리컨실레이션 트리거
+				if val, ok := svc.Annotations["openapi.aggregator.io/swagger"]; ok && val == "true" {
+					return []ctrl.Request{
+						{NamespacedName: types.NamespacedName{
+							Name:      "openapi-aggregator",
+							Namespace: svc.Namespace,
+						}},
+					}
+				}
+				return nil
+			}),
+		).
 		Complete(r)
 }

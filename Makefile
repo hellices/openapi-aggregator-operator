@@ -155,9 +155,20 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=amd64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=arm64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go
-	ln -sf manager_$(ARCH) bin/manager
+	@mkdir -p bin
+	@if [ "$(GOARCH)" = "amd64" ] || [ "$(GOARCH)" = "" ]; then \
+		echo "Building amd64 binary..." ;\
+		CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=amd64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go ;\
+	fi
+	@if [ "$(GOARCH)" = "arm64" ] || [ "$(GOARCH)" = "" ]; then \
+		echo "Building arm64 binary..." ;\
+		CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=arm64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go ;\
+	fi
+	@if [ "$(GOARCH)" = "" ]; then \
+		ln -sf manager_$$(go env GOARCH) bin/manager ;\
+	else \
+		ln -sf manager_$(GOARCH) bin/manager ;\
+	fi
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -287,8 +298,12 @@ set -e; \
 package=$(2)@$(3) ;\
 echo "Downloading and building $${package} for $$(go env GOARCH)" ;\
 rm -f $(1) || true ;\
-GOARCH=$$(go env GOARCH) GOBIN=$(LOCALBIN) go install $${package} ;\
+TEMP_DIR=$$(mktemp -d) ;\
+cd $$TEMP_DIR ;\
+GOBIN=$(LOCALBIN) go install $${package} ;\
+cd - ;\
 mv $(1) $(1)-$(3)-$$(go env GOARCH) ;\
+rm -rf $$TEMP_DIR ;\
 } ;\
 ln -sf $(1)-$(3)-$$(go env GOARCH) $(1)
 endef
