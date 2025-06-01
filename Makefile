@@ -71,8 +71,6 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	mkdir -p $(LOCALBIN)
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
@@ -252,7 +250,9 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
+
+## Create bin directory if it doesn't exist
+bin_dir: ## Create bin directory
 	mkdir -p $(LOCALBIN)
 
 ## Tool Binaries
@@ -269,24 +269,20 @@ ENVTEST_VERSION ?= release-0.19
 GOLANGCI_LINT_VERSION ?= v1.59.1
 
 .PHONY: kustomize
-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+kustomize: bin_dir ## Download kustomize locally if necessary.
+	[ -f $(KUSTOMIZE) ] || $(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
 
 .PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
-	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+controller-gen: bin_dir ## Download controller-gen locally if necessary.
+	[ -f $(CONTROLLER_GEN) ] || $(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: envtest
-envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
-$(ENVTEST): $(LOCALBIN)
-	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+envtest: bin_dir ## Download setup-envtest locally if necessary.
+	[ -f $(ENVTEST) ] || $(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
 
 .PHONY: golangci-lint
-golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
+	[ -f $(GOLANGCI_LINT) ] || $(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -300,7 +296,7 @@ echo "Downloading and building $${package} for $$(go env GOARCH)" ;\
 rm -f $(1) || true ;\
 TEMP_DIR=$$(mktemp -d) ;\
 cd $$TEMP_DIR ;\
-GOBIN=$(LOCALBIN) go install $${package} ;\
+GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) CGO_ENABLED=0 go build -o $(1) $${package} ;\
 cd - ;\
 mv $(1) $(1)-$(3)-$$(go env GOARCH) ;\
 rm -rf $$TEMP_DIR ;\
