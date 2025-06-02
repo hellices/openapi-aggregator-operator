@@ -159,11 +159,11 @@ build: manifests generate fmt vet ## Build manager binary.
 	@mkdir -p bin
 	@if [ "$(GOARCH)" = "amd64" ] || [ "$(GOARCH)" = "" ]; then \
 		echo "Building amd64 binary..." ;\
-		CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=amd64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go ;\
+		GOOS=$(GOOS) GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go ;\
 	fi
 	@if [ "$(GOARCH)" = "arm64" ] || [ "$(GOARCH)" = "" ]; then \
 		echo "Building arm64 binary..." ;\
-		CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=arm64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go ;\
+		GOOS=$(GOOS) GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go ;\
 	fi
 	@if [ "$(GOARCH)" = "" ]; then \
 		ln -sf manager_$$(go env GOARCH) bin/manager ;\
@@ -301,16 +301,16 @@ echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
 TEMP_DIR=$$(mktemp -d) ;\
 cd $$TEMP_DIR ;\
 GO111MODULE=on go mod init tmp ;\
-case "$$(go env GOHOSTOS)" in \
-  darwin) \
-    CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go build -o $(1)-$(3)-$$(go env GOARCH) $(2)@$(3) ;; \
-  linux) \
-    CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOARCH) go build -o $(1)-$(3)-$$(go env GOARCH) $(2)@$(3) ;; \
-esac ;\
+GO111MODULE=on GOBIN=$(WORKSPACE_DIR)/bin go install $(2)@$(3) ;\
+if [ -f "$(WORKSPACE_DIR)/bin/$$(basename $(1))" ]; then \
+  mv "$(WORKSPACE_DIR)/bin/$$(basename $(1))" "$(1)-$(3)-$$(go env GOARCH)" ;\
+fi ;\
 cd $(WORKSPACE_DIR) ;\
 rm -rf $$TEMP_DIR ;\
 } ;\
-ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)"
+if [ -f "$(1)-$(3)-$$(go env GOARCH)" ]; then \
+  ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)" ;\
+fi
 endef
 
 .PHONY: operator-sdk
