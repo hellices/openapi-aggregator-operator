@@ -277,8 +277,10 @@ controller-gen: bin_dir ## Download controller-gen locally if necessary.
 	[ -f $(CONTROLLER_GEN) ] || $(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: envtest
-envtest: bin_dir ## Download setup-envtest locally if necessary.
-	[ -f $(ENVTEST) ] || $(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+envtest: ## Download envtest-setup locally if necessary
+	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,release-0.19)
+	KUBEBUILDER_ASSETS=$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path) \
+	go test $(GO_TEST_FLAGS) $(shell go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: golangci-lint
 golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
@@ -289,19 +291,17 @@ golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
 # $2 - package url which can be installed
 # $3 - specific version of package
 define go-install-tool
-@[ -f "$(1)-$(3)-$$(go env GOARCH)" ] || { \
+[ -f "$(1)-$(3)-$$(go env GOARCH)" ] || { \
 set -e; \
-package=$(2)@$(3) ;\
-echo "Downloading and building $${package} for $$(go env GOARCH)" ;\
-rm -f $(1) || true ;\
+echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
 TEMP_DIR=$$(mktemp -d) ;\
 cd $$TEMP_DIR ;\
-GOOS=$$(go env GOOS) GOARCH=$$(go env GOARCH) CGO_ENABLED=0 go build -o $(1) $${package} ;\
-cd - ;\
-mv $(1) $(1)-$(3)-$$(go env GOARCH) ;\
+GO111MODULE=on go mod init tmp ;\
+GO111MODULE=on GOBIN=$$(dirname $(1)) go install $(2)@$(3) ;\
+mv "$$(dirname $(1))/$$(basename $(1))" "$(1)-$(3)-$$(go env GOARCH)" ;\
 rm -rf $$TEMP_DIR ;\
 } ;\
-ln -sf $(1)-$(3)-$$(go env GOARCH) $(1)
+ln -sf "$(1)-$(3)-$$(go env GOARCH)" "$(1)"
 endef
 
 .PHONY: operator-sdk
