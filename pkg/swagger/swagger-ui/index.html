@@ -5,102 +5,33 @@
     <meta charset="UTF-8">
     <title>OpenAPI Aggregator</title>
     <link rel="stylesheet" type="text/css" href="./assets/swagger-ui.css">
+    <link rel="stylesheet" type="text/css" href="./assets/custom.css">
     <link rel="icon" type="image/png" href="./assets/favicon-32x32.png" sizes="32x32" />
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background: #fafafa;
-        }
-        #swagger-ui {
-            max-width: 1460px;
-            margin: 0 auto;
-            padding: 20px;
-            background: white;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
-        }
-        .swagger-ui .topbar {
-            background: #1b1b1b;
-            padding: 10px 0;
-        }
-        .api-selector-wrapper {
-            background: #1b1b1b;
-            padding: 30px 0 10px;
-            margin-bottom: 30px;
-        }
-        .api-selector {
-            max-width: 1460px;
-            margin: 0 auto;
-            padding: 0 20px;
-        }
-        .api-selector-title {
-            color: #fff;
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 20px;
-            font-family: sans-serif;
-        }
-        .api-selector-subtitle {
-            color: rgba(255,255,255,0.7);
-            font-size: 14px;
-            margin-bottom: 20px;
-            font-family: sans-serif;
-        }
-        .api-selector select {
-            width: 100%;
-            padding: 10px 32px 10px 12px;
-            border: 1px solid #50555e;
-            border-radius: 4px;
-            background: #1b1b1b;
-            color: #fff;
-            font-family: sans-serif;
-            font-size: 14px;
-            appearance: none;
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3e%3cpath d='M7 10l5 5 5-5z'/%3e%3c/svg%3e");
-            background-repeat: no-repeat;
-            background-position: right 10px center;
-            background-size: 20px;
-        }
-        .api-selector select:hover {
-            border-color: #89bf04;
-            background-color: #222;
-        }
-        .api-selector select:focus {
-            outline: none;
-            border-color: #89bf04;
-            box-shadow: 0 0 0 1px #89bf04;
-        }
-        .api-selector select option {
-            background: #1b1b1b;
-            color: #fff;
-            padding: 8px;
-        }
-        .api-info {
-            margin-top: 10px;
-            color: rgba(255,255,255,0.7);
-            font-family: sans-serif;
-            font-size: 13px;
-            line-height: 1.5;
-        }
-        .api-info div {
-            margin: 4px 0;
-        }
-        .swagger-ui .info {
-            margin: 20px 0;
-        }
-        </style>
 </head>
 <body>
     <div class="api-selector-wrapper">
         <div class="api-selector">
             <h1 class="api-selector-title">OpenAPI Specifications</h1>
-            <div class="api-selector-subtitle">Select an API service to view its documentation</div>
-            <select id="apiSelector" onchange="loadSelectedAPI()">
-                <option value="">Loading APIs...</option>
-            </select>
+            <div class="api-selector-subtitle">Select a namespace and service to view its documentation</div>
+            <div class="selector-container">
+                <div class="selector-group">
+                    <label>Namespace</label>
+                    <div class="select-container">
+                        <input type="text" id="namespaceInput" list="namespaceList" placeholder="Select or type to filter namespaces..." oninput="handleNamespaceInput(this.value)">
+                        <datalist id="namespaceList">
+                            <option value="All Namespaces">
+                        </datalist>
+                    </div>
+                </div>
+                <div class="selector-group">
+                    <label>Service</label>
+                    <div class="select-container">
+                        <input type="text" id="serviceInput" list="serviceList" placeholder="Select or type to filter services..." oninput="handleServiceInput(this.value)">
+                        <datalist id="serviceList">
+                        </datalist>
+                    </div>
+                </div>
+            </div>
             <div id="apiInfo" class="api-info"></div>
         </div>
     </div>
@@ -108,153 +39,348 @@
     <script src="./assets/swagger-ui-bundle.js"></script>
     <script src="./assets/swagger-ui-standalone-preset.js"></script>
     <script>
-        let swaggerUI;
-        let apiSpecs = {};
+        // State management
+        const state = {
+            swaggerUI: null,
+            apiSpecs: {},
+            currentApisByNamespace: {},
+            retryCount: 0,
+            maxRetries: 10
+        };
 
-        function updateAPISelector(specs) {
-            const selector = document.getElementById('apiSelector');
-            selector.innerHTML = '';
-            
-            if (Object.keys(specs).length === 0) {
-                selector.innerHTML = '<option value="">No APIs available</option>';
-                return;
-            }
+        // UI Elements
+        const elements = {
+            get namespaceList() { return document.getElementById('namespaceList'); },
+            get namespaceInput() { return document.getElementById('namespaceInput'); },
+            get serviceList() { return document.getElementById('serviceList'); },
+            get serviceInput() { return document.getElementById('serviceInput'); },
+            get apiInfo() { return document.getElementById('apiInfo'); },
+            get swaggerContainer() { return document.getElementById('swagger-ui'); }
+        };
 
-            selector.innerHTML = '<option value="">Select an API...</option>';
-            Object.keys(specs).forEach(name => {
-                const api = specs[name];
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                selector.appendChild(option);
-            });
-        }
+        // API Data Management
+        const apiManager = {
+            getBasePath() {
+                // Get base path from server or default to ''
+                return document.querySelector('meta[name="base-path"]')?.getAttribute('content') || '';
+            },
 
-        function updateAPIInfo(apiName) {
-            const infoDiv = document.getElementById('apiInfo');
-            if (!apiName || !apiSpecs[apiName]) {
-                infoDiv.innerHTML = '';
-                return;
-            }
+            groupApisByNamespace(specs) {
+                state.currentApisByNamespace = {};
+                Object.keys(specs).forEach(name => {
+                    const api = specs[name];
+                    const namespace = api.namespace || 'unknown';
+                    if (!state.currentApisByNamespace[namespace]) {
+                        state.currentApisByNamespace[namespace] = [];
+                    }
+                    state.currentApisByNamespace[namespace].push({name, ...api});
+                });
+            },
 
-            const api = apiSpecs[apiName];
-            infoDiv.innerHTML = `
-                <div>Type: ${api.resourceType} | Name: ${api.resourceName}</div>
-                <div>Namespace: ${api.namespace}</div>
-                <div>Last Updated: ${api.lastUpdated}</div>
-            `;
-        }
-
-        function loadSelectedAPI() {
-            const selector = document.getElementById('apiSelector');
-            const selectedAPI = selector.value;
-            
-            updateAPIInfo(selectedAPI);
-            
-            if (!selectedAPI || !apiSpecs[selectedAPI]) {
-                if (swaggerUI) {
-                    swaggerUI.clear();
+            getServicesByNamespace(selectedNamespace) {
+                const isAllNamespaces = selectedNamespace === 'All Namespaces';
+                let services = [];
+                if (isAllNamespaces) {
+                    Object.values(state.currentApisByNamespace).forEach(namespaceServices => {
+                        services = services.concat(namespaceServices);
+                    });
+                } else {
+                    services = state.currentApisByNamespace[selectedNamespace] || [];
                 }
-                return;
-            }
+                return { services, isAllNamespaces };
+            },
 
-            // Fetch the spec from the API endpoint
-            fetch('/api/' + selectedAPI)
-                .then(response => {
+            async loadSpecs() {
+                const response = await fetch('/swagger-specs');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const specs = await response.json();
+                state.apiSpecs = specs;
+                this.groupApisByNamespace(specs);
+                uiManager.updateNamespaceDatalist();
+                uiManager.updateServiceDatalist();
+            }
+        };
+
+        // UI Management
+        const uiManager = {
+            updateNamespaceDatalist() {
+                const filterValue = elements.namespaceInput.value.toLowerCase();
+                elements.namespaceList.innerHTML = '<option value="All Namespaces">';
+                
+                Object.keys(state.currentApisByNamespace)
+                    .sort()
+                    .filter(namespace => namespace.toLowerCase().includes(filterValue))
+                    .forEach(namespace => {
+                        const option = document.createElement('option');
+                        option.value = namespace;
+                        elements.namespaceList.appendChild(option);
+                    });
+            },
+
+            updateServiceDatalist(selectedNamespace) {
+                if (!selectedNamespace) return;
+
+                const filterValue = elements.serviceInput.value.toLowerCase();
+                elements.serviceList.innerHTML = '';
+
+                const { services, isAllNamespaces } = apiManager.getServicesByNamespace(selectedNamespace);
+
+                services
+                    .sort((a, b) => {
+                        if (isAllNamespaces) {
+                            const nsCompare = a.namespace.localeCompare(b.namespace);
+                            return nsCompare !== 0 ? nsCompare : a.name.localeCompare(b.name);
+                        }
+                        return a.name.localeCompare(b.name);
+                    })
+                    .filter(api => {
+                        const searchText = isAllNamespaces 
+                            ? `${api.namespace}/${api.name}` 
+                            : api.name;
+                        return !filterValue || searchText.toLowerCase().includes(filterValue);
+                    })
+                    .forEach(api => {
+                        const option = document.createElement('option');
+                        option.value = isAllNamespaces 
+                            ? `${api.namespace} / ${api.name}`
+                            : api.name;
+                        elements.serviceList.appendChild(option);
+                    });
+            },
+
+            updateAPIInfo(apiName) {
+                if (!apiName || !state.apiSpecs[apiName]) {
+                    elements.apiInfo.innerHTML = '';
+                    return;
+                }
+
+                const api = state.apiSpecs[apiName];
+                elements.apiInfo.innerHTML = `
+                    <div>Type: ${api.resourceType || 'Service'} | Service: ${api.name}</div>
+                    <div>Namespace: ${api.namespace}</div>
+                    <div>Last Updated: ${api.lastUpdated ? new Date(api.lastUpdated).toLocaleString() : 'Not available'}</div>
+                `;
+            },
+
+            showError(error, isRetryable = false) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-message';
+                errorDiv.style.cssText = 'padding: 20px; margin: 20px; background-color: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px;';
+                errorDiv.innerHTML = `
+                    <h2 style="color: #c62828; margin-top: 0;">Failed to load API specifications</h2>
+                    ${isRetryable ? `
+                    <p>Please check the following:</p>
+                    <ul>
+                        <li>The operator pod is running</li>
+                        <li>The OpenAPIAggregator CR is properly configured</li>
+                        <li>Target services are running and accessible</li>
+                        <li>Services expose OpenAPI specs at the configured paths</li>
+                    </ul>
+                    ` : ''}
+                    <p>Error: ${error.message}</p>
+                    ${isRetryable ? `
+                    <button onclick="window.location.reload()" style="padding: 8px 16px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Retry
+                    </button>
+                    ` : ''}
+                `;
+                elements.swaggerContainer.innerHTML = '';
+                elements.swaggerContainer.appendChild(errorDiv);
+            }
+        };
+
+        // Swagger UI Management
+        const swaggerManager = {
+            initSwaggerUI() {
+                if (!state.swaggerUI) {
+                    state.swaggerUI = SwaggerUIBundle({
+                        dom_id: '#swagger-ui',
+                        deepLinking: true,
+                        displayRequestDuration: true,
+                        filter: true,
+                        presets: [
+                            SwaggerUIBundle.presets.apis,
+                            SwaggerUIStandalonePreset
+                        ],
+                        plugins: [
+                            SwaggerUIBundle.plugins.DownloadUrl
+                        ],
+                        layout: "BaseLayout"
+                    });
+                }
+                return state.swaggerUI;
+            },
+
+            async loadAPI(selectedService) {
+                if (!selectedService) {
+                    resetUI();
+                    return;
+                }
+
+                const parts = selectedService.split(' / ').map(part => part.trim());
+                let apiName = selectedService;
+                
+                if (parts.length > 1) {
+                    const [namespace, serviceName] = parts;
+                    const servicesInNamespace = state.currentApisByNamespace[namespace] || [];
+                    const service = servicesInNamespace.find(s => s.name === serviceName);
+                    if (service) apiName = service.name;
+                } else {
+                    const selectedNamespace = elements.namespaceInput.value;
+                    if (selectedNamespace && selectedNamespace !== 'All Namespaces') {
+                        const servicesInNamespace = state.currentApisByNamespace[selectedNamespace] || [];
+                        const service = servicesInNamespace.find(s => s.name === selectedService);
+                        if (service) apiName = service.name;
+                    }
+                }
+
+                uiManager.updateAPIInfo(apiName);
+                
+                if (!state.apiSpecs[apiName]) {
+                    resetUI();
+                    return;
+                }
+
+                try {
+                    const basePath = apiManager.getBasePath();
+                    const response = await fetch(`${basePath}/api/${apiName}`);
                     if (!response.ok) {
                         throw new Error(`Failed to fetch spec: ${response.status}`);
                     }
-                    return response.json();
-                })
-                .then(spec => {
-                    if (!swaggerUI) {
-                        swaggerUI = SwaggerUIBundle({
-                            dom_id: '#swagger-ui',
-                            deepLinking: true,
-                            displayRequestDuration: true,
-                            filter: true,
-                            presets: [
-                                SwaggerUIBundle.presets.apis,
-                                SwaggerUIStandalonePreset
-                            ],
-                            plugins: [
-                                SwaggerUIBundle.plugins.DownloadUrl
-                            ],
-                            layout: "BaseLayout"
-                        });
-                    }
+                    const spec = await response.json();
+                    const api = state.apiSpecs[apiName];
+                    
+                    // 이전 UI 초기화
+                    elements.swaggerContainer.innerHTML = '';
+                    
+                    // Get allowed methods from API info
+                    const allowedMethods = api.allowedMethods || [];
+                    
+                    // 새로운 SwaggerUI 인스턴스 생성
+                    state.swaggerUI = SwaggerUIBundle({
+                        dom_id: '#swagger-ui',
+                        spec: spec,
+                        deepLinking: true,
+                        displayRequestDuration: true,
+                        filter: true,
+                        presets: [
+                            SwaggerUIBundle.presets.apis,
+                            SwaggerUIStandalonePreset
+                        ],
+                        supportedSubmitMethods: api.allowedMethods || [], // Use allowed methods from API info
+                        plugins: [
+                            SwaggerUIBundle.plugins.DownloadUrl
+                        ],
+                        layout: "BaseLayout"
+                    });
+                } catch (error) {
+                    uiManager.showError(error);
+                }
+            }
+        };
 
-                    swaggerUI.specActions.updateSpec(JSON.stringify(spec));
-                })
-                .catch(error => {
-                    console.error('Error loading API spec:', error);
-                    const errorDiv = document.getElementById('swagger-ui');
-                    errorDiv.innerHTML = `
-                        <div style="padding: 20px; background-color: #ffebee; border: 1px solid #ffcdd2; border-radius: 4px;">
-                            <h3 style="color: #c62828; margin-top: 0;">Failed to load API specification</h3>
-                            <p>${error.message}</p>
-                        </div>
-                    `;
-                });
+        // Event Handlers
+        function resetUI() {
+            // Swagger UI 초기화
+            if (state.swaggerUI) {
+                // 기존 Swagger UI 인스턴스 제거
+                elements.swaggerContainer.innerHTML = '';
+                state.swaggerUI = null;
+            }
+            
+            // API 정보 초기화
+            elements.apiInfo.innerHTML = '';
         }
 
-        window.onload = function() {
-            let retryCount = 0;
-            const maxRetries = 10;
+        function setupInputListeners() {
+            const inputs = [elements.namespaceInput, elements.serviceInput];
+            let lastClickTime = 0;
+            
+            inputs.forEach(input => {
+                // 클릭할 때 input 값 초기화 (더블클릭 방지)
+                input.addEventListener('click', function(e) {
+                    const currentTime = new Date().getTime();
+                    if (currentTime - lastClickTime < 300) return; // 더블클릭 방지
+                    lastClickTime = currentTime;
 
-            function loadSpecs() {
-                console.log('Attempting to load specs, attempt ' + (retryCount + 1));
-                fetch('/swagger-specs')
-                    .then(response => {
-                        console.log('Response status:', response.status);
-                        if (!response.ok) {
-                            throw new Error(`HTTP error! status: ${response.status}`);
-                        }
-                        return response.json();
-                    })
-                    .then(specs => {
-                        apiSpecs = specs;
-                        updateAPISelector(specs);
-                        
-                        // Just update the selector, we'll initialize SwaggerUI when an API is selected
-                        updateAPISelector(specs);
-                    })
-                    .catch(error => {
-                        console.error('Error loading specs:', error);
-                        if (retryCount < maxRetries) {
-                            retryCount++;
-                            const delay = Math.min(1000 * Math.pow(2, retryCount), 10000); // 지수 백오프, 최대 10초
-                            console.log(`Retrying in ${delay}ms...`);
-                            setTimeout(loadSpecs, delay);
-                        } else {
-                            const errorDiv = document.createElement('div');
-                            errorDiv.className = 'error-message';
-                            errorDiv.style.padding = '20px';
-                            errorDiv.style.margin = '20px';
-                            errorDiv.style.backgroundColor = '#ffebee';
-                            errorDiv.style.border = '1px solid #ffcdd2';
-                            errorDiv.style.borderRadius = '4px';
-                            errorDiv.innerHTML = `
-                                <h2 style="color: #c62828; margin-top: 0;">Failed to load API specifications</h2>
-                                <p>Please check the following:</p>
-                                <ul>
-                                    <li>The operator pod is running</li>
-                                    <li>The OpenAPIAggregator CR is properly configured</li>
-                                    <li>Target services are running and accessible</li>
-                                    <li>Services expose OpenAPI specs at the configured paths</li>
-                                </ul>
-                                <p>Last error: ${error.message}</p>
-                                <button onclick="window.location.reload()" style="padding: 8px 16px; background: #2196f3; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                                    Retry
-                                </button>
-                            `;
-                            document.getElementById('swagger-ui').innerHTML = '';
-                            document.getElementById('swagger-ui').appendChild(errorDiv);
-                            document.getElementById('apiSelector').innerHTML = '<option value="">Load failed</option>';
-                        }
-                    });
+                    this.value = '';
+                    resetUI();
+                    
+                    // 네임스페이스 클릭시 서비스도 초기화
+                    if (this === elements.namespaceInput) {
+                        elements.serviceInput.value = '';
+                    }
+                });
+
+                // focus 시에도 동일하게 처리
+                input.addEventListener('focus', function() {
+                    this.value = '';
+                    resetUI();
+                    
+                    if (this === elements.namespaceInput) {
+                        elements.serviceInput.value = '';
+                    }
+                });
+
+                // 선택 완료 후 blur 이벤트 처리
+                input.addEventListener('blur', function() {
+                    if (!this.value.trim()) {
+                        resetUI();
+                    }
+                });
+            });
+        }
+
+        function handleNamespaceInput(value) {
+            const normalizedValue = value.trim();
+            
+            // UI 업데이트
+            uiManager.updateNamespaceDatalist();
+            uiManager.updateServiceDatalist(normalizedValue);
+            
+            // 값이 변경되면 서비스 초기화
+            if (value !== elements.namespaceInput.defaultValue) {
+                elements.serviceInput.value = '';
             }
-            loadSpecs();
+
+            resetUI();
+        }
+
+        function handleServiceInput(value) {
+            const normalizedValue = value.trim();
+            resetUI();
+
+            // 새로운 서비스가 선택되면 API 로드
+            if (normalizedValue) {
+                setTimeout(() => {
+                    const currentService = elements.serviceInput.value;
+                    if (currentService) {
+                        swaggerManager.loadAPI(currentService);
+                    }
+                }, 100);
+            }
+        }
+
+        // Initialize
+        window.onload = async function() {
+            async function loadWithRetry() {
+                try {
+                    await apiManager.loadSpecs();
+                    setupInputListeners(); // 초기 로드 후 이벤트 리스너 설정
+                } catch (error) {
+                    if (state.retryCount < state.maxRetries) {
+                        state.retryCount++;
+                        const delay = Math.min(1000 * Math.pow(2, state.retryCount), 10000);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        await loadWithRetry();
+                    } else {
+                        uiManager.showError(error, true);
+                    }
+                }
+            }
+            await loadWithRetry();
         };
     </script>
 </body>

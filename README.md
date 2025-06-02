@@ -3,8 +3,6 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/hellices/openapi-aggregator-operator)](https://goreportcard.com/report/github.com/hellices/openapi-aggregator-operator)
 [![GitHub License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/hellices/openapi-aggregator-operator)](go.mod)
-[![Docker Pulls](https://img.shields.io/docker/pulls/hellices/openapi-aggregator-operator)](https://hub.docker.com/r/hellices/openapi-aggregator-operator)
-[![Release](https://img.shields.io/github/v/release/hellices/openapi-aggregator-operator)](https://github.com/hellices/openapi-aggregator-operator/releases)
 
 Kubernetes operator that discovers and aggregates OpenAPI/Swagger specifications from services running in your cluster. It provides a unified Swagger UI interface to browse and test all your APIs in one place.
 
@@ -61,6 +59,55 @@ Then open http://localhost:9090 in your browser.
 - 🌐 **Unified UI**: Single Swagger UI interface to browse all discovered APIs
 - 📝 **Service Information**: Displays service metadata including namespace and resource type
 - ⚡ **Zero-config Services**: Works with any service that exposes an OpenAPI/Swagger specification
+
+### 5. Ingress/Route Integration
+
+You can expose the Swagger UI through Ingress or OpenShift Route. 
+
+#### Using Kubernetes Ingress
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swagger-ui
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - host: api.example.com
+    http:
+      paths:
+      - path: /swagger-ui(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: openapi-aggregator-openapi-aggregator-swagger-ui
+            port:
+              number: 9090
+```
+
+And set the environment variable in the deployment:
+```yaml
+env:
+- name: SWAGGER_BASE_PATH
+  value: /swagger-ui
+```
+
+#### Using OpenShift Route
+
+```yaml
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: swagger-ui
+spec:
+  to:
+    kind: Service
+    name: openapi-aggregator-openapi-aggregator-swagger-ui
+  port:
+    targetPort: swagger-ui
+```
 
 ## Project Architecture
 
@@ -122,8 +169,18 @@ make deploy
 
 For installation via Operator Lifecycle Manager, see detailed instructions in [OLM Installation Guide](docs/olm-install.md).
 
-### Development Commands
+### Development Environment Setup
 
+1. Deploy the test service:
+```bash
+# First, deploy the test service that provides OpenAPI specs
+kubectl apply -f config/samples/test-service.yaml
+
+# Port forward the test service to localhost:8080
+kubectl port-forward svc/test-service 8080:8080
+```
+
+2. Run the operator in development mode:
 ```bash
 # Run locally
 make run
@@ -137,6 +194,8 @@ make docker-build docker-push
 # Generate manifests
 make manifests
 ```
+
+Note: When running the operator in development mode with `make run`, ensure that the test service is running and port-forwarded to localhost:8080. This is required for the operator to properly fetch and display the OpenAPI specifications in the Swagger UI.
 
 ### Version Management
 

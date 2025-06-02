@@ -4,36 +4,48 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  GO_VERSION: '1.23'
+  RUNNING_IN_CI: true
+
 jobs:
-  build:
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.22'
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install dependencies
-      run: |
-        go mod download
-        go mod verify
-
-    - name: Build
-      run: |
-        GOARCH=${{ matrix.arch }} make build
-        
-    - name: Run tests
-      run: make test
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+    - name: Cache tools
+      uses: actions/cache@v4
       with:
-        name: manager-${{ matrix.arch }}
-        path: bin/manager-${{ matrix.arch }}
+        path: |
+          bin/
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-tools-${{ hashFiles('Makefile') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install tools
+      run: |
+        echo "::group::Installing development tools"
+        make tools
+        echo "::endgroup::"
+
+    - name: Build and test
+      run: |
+        echo "::group::Building project"
+        make build
+        echo "::endgroup::"
+        
+        echo "::group::Running tests"
+        make test
+        echo "::endgroup::"

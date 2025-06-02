@@ -1,22 +1,25 @@
-# Common variables and settings
-ARCH ?= $(shell go env GOARCH)
+# ====================
+# Base Settings
+# ====================
+
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -euo pipefail -c
+
+# Directory settings
+WORKSPACE_DIR := $(CURDIR)
+LOCALBIN := $(WORKSPACE_DIR)/bin
+
+# Build settings
 GOOS ?= linux
-PLATFORMS ?= linux/arm64,linux/amd64
+GOARCH ?= $(shell go env GOARCH)
+CGO_ENABLED ?= 0
+COMMON_LDFLAGS := -s -w
 
-# Version information
-GIT_VERSION ?= $(shell git describe --tags --always)
-FILE_VERSION ?= $(shell awk -F= '/^operator=/ {print $$2}' versions.txt)
-# Use git version if available, otherwise fall back to versions.txt
-VERSION ?= $(if $(shell git describe --tags --exact-match 2>/dev/null),$(GIT_VERSION),$(FILE_VERSION))
-VERSION_DATE ?= $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
-VERSION_PKG ?= github.com/hellices/openapi-aggregator-operator/pkg/version
-
-# LDFLAGS for the build
-COMMON_LDFLAGS ?= -s -w
-OPERATOR_LDFLAGS ?= -X ${VERSION_PKG}.version=${VERSION} -X ${VERSION_PKG}.buildDate=${VERSION_DATE}
-ifneq ($(origin CHANNELS), undefined)
-BUNDLE_CHANNELS := --channels=$(CHANNELS)
-endif
+# Version settings
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git describe --tags --always)
+VERSION_DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
+VERSION_PKG := github.com/hellices/openapi-aggregator-operator/pkg/version
+OPERATOR_LDFLAGS := -X $(VERSION_PKG).version=$(VERSION) -X $(VERSION_PKG).buildDate=$(VERSION_DATE)
 
 # DEFAULT_CHANNEL defines the default channel used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g DEFAULT_CHANNEL = "stable")
@@ -71,8 +74,6 @@ GOBIN=$(shell go env GOBIN)
 endif
 
 LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
-	mkdir -p $(LOCALBIN)
 
 # CONTAINER_TOOL defines the container tool to be used for building images.
 # Be aware that the target commands are only tested with Docker which is
@@ -134,14 +135,16 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-.PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+.PHONY: test test-e2e test-coverage
+test: manifests generate fmt vet envtest ## Run unit tests
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
+	go test $(shell go list ./... | grep -v /test/e2e) -v -race -coverprofile=cover.out -covermode=atomic
 
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
-test-e2e:
-	go test ./test/e2e/ -v -ginkgo.v
+test-e2e: docker-build ## Run e2e tests
+	go test ./test/e2e/... -v -ginkgo.v
+
+test-coverage: test ## Generate test coverage report
+	go tool cover -html=cover.out -o coverage.html
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -153,15 +156,32 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 ##@ Build
 
-.PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=amd64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go
-	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=arm64 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go
-	ln -sf manager_$(ARCH) bin/manager
+.PHONY: build build-only build-all
+build: manifests generate fmt vet ## Build manager binary for current architecture
+	@$(MAKE) build-only
+
+build-only: ## Build manager binary without preprocessing
+	@mkdir -p $(LOCALBIN)
+	@echo "Building manager for $(GOARCH)..."
+	@CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go build \
+		-ldflags "$(COMMON_LDFLAGS) $(OPERATOR_LDFLAGS)" \
+		-o $(LOCALBIN)/manager_$(GOARCH) cmd/main.go
+	@cd $(LOCALBIN) && ln -sf manager_$(GOARCH) manager
+
+BUILD_PLATFORMS := amd64 arm64
+build-all: manifests generate fmt vet ## Build manager binaries for all architectures
+	@mkdir -p $(LOCALBIN)
+	@for arch in $(BUILD_PLATFORMS); do \
+		echo "Building manager for $$arch..." ;\
+		GOOS=$(GOOS) GOARCH=$$arch CGO_ENABLED=0 go build \
+			-ldflags "$(COMMON_LDFLAGS) $(OPERATOR_LDFLAGS)" \
+			-o $(LOCALBIN)/manager_$$arch cmd/main.go ;\
+	done
+	@cd $(LOCALBIN) && ln -sf manager_$$(go env GOARCH) manager
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	DEV_MODE=true go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -241,56 +261,96 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 ## Location to install dependencies to
 LOCALBIN ?= $(shell pwd)/bin
-$(LOCALBIN):
+
+## Create bin directory if it doesn't exist
+bin_dir: ## Create bin directory
 	mkdir -p $(LOCALBIN)
 
-## Tool Binaries
-KUBECTL ?= kubectl
-KUSTOMIZE ?= $(LOCALBIN)/kustomize
-CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
-ENVTEST ?= $(LOCALBIN)/setup-envtest
-GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+## Tool Versions and Configurations
+TOOLS := kustomize controller-gen setup-envtest golangci-lint operator-sdk
+TOOL_VERSIONS := \
+    KUSTOMIZE=v5.4.3 \
+    CONTROLLER_GEN=v0.16.1 \
+    ENVTEST=release-0.19 \
+    GOLANGCI_LINT=v1.59.1 \
+    OPERATOR_SDK=v1.39.2
 
-## Tool Versions
-KUSTOMIZE_VERSION ?= v5.4.3
-CONTROLLER_TOOLS_VERSION ?= v0.16.1
-ENVTEST_VERSION ?= release-0.19
-GOLANGCI_LINT_VERSION ?= v1.59.1
+# Build Architecture Settings
+BUILD_ARCH ?= $(shell go env GOARCH)
+ifeq ($(RUNNING_IN_CI),true)
+    # Force AMD64 in CI environment
+    BUILD_ARCH := amd64
+endif
 
-.PHONY: kustomize
-kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
-$(KUSTOMIZE): $(LOCALBIN)
-	$(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+# Tool Paths and URLs
+KUBECTL := kubectl
+KUSTOMIZE := $(LOCALBIN)/kustomize
+CONTROLLER_GEN := $(LOCALBIN)/controller-gen
+ENVTEST := $(LOCALBIN)/setup-envtest
+GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
+OPERATOR_SDK := $(LOCALBIN)/operator-sdk
 
-.PHONY: controller-gen
-controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
-$(CONTROLLER_GEN): $(LOCALBIN)
-	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+# Tool URLs
+KUSTOMIZE_PKG := sigs.k8s.io/kustomize/kustomize/v5
+CONTROLLER_GEN_PKG := sigs.k8s.io/controller-tools/cmd/controller-gen
+ENVTEST_PKG := sigs.k8s.io/controller-runtime/tools/setup-envtest
+GOLANGCI_LINT_PKG := github.com/golangci/golangci-lint/cmd/golangci-lint
 
-.PHONY: envtest
-envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
-$(ENVTEST): $(LOCALBIN)
-	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+.PHONY: tools tools-verify kustomize controller-gen envtest golangci-lint
+tools: bin_dir ## Download and install all tools
+	@echo "Installing tools for $(BUILD_ARCH)..."
+	@$(MAKE) kustomize controller-gen envtest golangci-lint
+	@echo "All tools installed successfully!"
 
-.PHONY: golangci-lint
-golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
-$(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+tools-verify: ## Verify all required tools are installed
+	@echo "Verifying tools..."
+	@for tool in $(TOOLS); do \
+		if [ ! -f "$(LOCALBIN)/$$tool" ]; then \
+			echo "❌ Missing tool: $$tool" ;\
+			exit 1 ;\
+		fi ;\
+	done
+	@echo "✓ All tools are installed"
 
-# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
-# $1 - target path with name of binary
-# $2 - package url which can be installed
-# $3 - specific version of package
+kustomize: bin_dir ## Install kustomize
+	$(call go-install-tool,$(KUSTOMIZE),$(KUSTOMIZE_PKG),v5.4.3)
+
+controller-gen: bin_dir ## Install controller-gen
+	$(call go-install-tool,$(CONTROLLER_GEN),$(CONTROLLER_GEN_PKG),v0.16.1)
+
+envtest: bin_dir ## Install envtest
+	$(call go-install-tool,$(ENVTEST),$(ENVTEST_PKG),release-0.19)
+
+golangci-lint: bin_dir ## Install golangci-lint
+	$(call go-install-tool,$(GOLANGCI_LINT),$(GOLANGCI_LINT_PKG),v1.59.1)
+
+# Install Go tools
+# params: binary-path package-url version
 define go-install-tool
-@[ -f "$(1)-$(3)-$$(go env GOARCH)" ] || { \
-set -e; \
-package=$(2)@$(3) ;\
-echo "Downloading and building $${package} for $$(go env GOARCH)" ;\
-rm -f $(1) || true ;\
-GOARCH=$$(go env GOARCH) GOBIN=$(LOCALBIN) go install $${package} ;\
-mv $(1) $(1)-$(3)-$$(go env GOARCH) ;\
-} ;\
-ln -sf $(1)-$(3)-$$(go env GOARCH) $(1)
+@{ \
+    if [ -f "$(1)" ]; then \
+        echo "Tool already installed: $(1)" ;\
+        exit 0 ;\
+    fi ;\
+    set -e ;\
+    echo "Installing $(2)@$(3) for $(BUILD_ARCH)..." ;\
+    TEMP_DIR=$$(mktemp -d) ;\
+    cd $$TEMP_DIR ;\
+    GO111MODULE=on go mod init tmp ;\
+    GO111MODULE=on go get $(2)@$(3) ;\
+    BASE_NAME=$$(basename $(1)) ;\
+    BINARY_NAME="$$BASE_NAME-$(3)-$(BUILD_ARCH)" ;\
+    echo "Building $$BINARY_NAME..." ;\
+    CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(BUILD_ARCH) go build -o "$$BINARY_NAME" $(2) ;\
+    mkdir -p $(LOCALBIN) ;\
+    mv "$$BINARY_NAME" "$(LOCALBIN)/" ;\
+    cd $(LOCALBIN) ;\
+    rm -f "$$BASE_NAME" ;\
+    ln -sf "$$BINARY_NAME" "$$BASE_NAME" ;\
+    cd $(WORKSPACE_DIR) ;\
+    rm -rf $$TEMP_DIR ;\
+    echo "✓ Installed $$BASE_NAME for $(BUILD_ARCH)" ;\
+}
 endef
 
 .PHONY: operator-sdk
@@ -369,8 +429,11 @@ catalog-push: ## Push a catalog image.
 ##@ Development tools
 
 .PHONY: install-tools
-install-tools: ## Install development tools
-	$(LOCALBIN)/controller-gen --version || $(MAKE) controller-gen
-	$(LOCALBIN)/kustomize --version || $(MAKE) kustomize
-	$(LOCALBIN)/envtest --version || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-	setup-envtest use --bin-dir $(LOCALBIN) 1.24.2
+install-tools: bin_dir ## Install all development tools
+	$(MAKE) controller-gen
+	$(MAKE) kustomize
+	$(MAKE) envtest
+	$(MAKE) golangci-lint
+	$(MAKE) operator-sdk
+	@echo "Installing envtest assets..."
+	$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)
