@@ -138,7 +138,7 @@ vet: ## Run go vet against code.
 .PHONY: test test-e2e test-coverage
 test: manifests generate fmt vet envtest ## Run unit tests
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" \
-	go test ./... -v -race -coverprofile=cover.out -covermode=atomic
+	go test $(shell go list ./... | grep -v /test/e2e) -v -race -coverprofile=cover.out -covermode=atomic
 
 test-e2e: docker-build ## Run e2e tests
 	go test ./test/e2e/... -v -ginkgo.v
