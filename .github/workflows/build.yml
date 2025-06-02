@@ -5,17 +5,18 @@ on:
     branches: [ "main" ]
 
 env:
-  GO_VERSION: '1.22'
+  GO_VERSION: '1.23'
+  RUNNING_IN_CI: true
 
 jobs:
   build-and-test:
+    name: Build and Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -23,21 +24,28 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Setup environment
-      run: |
-        mkdir -p bin
-        chmod 755 bin
-        echo "GOOS=linux" >> $GITHUB_ENV
-        echo "CGO_ENABLED=0" >> $GITHUB_ENV
-        echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+    - name: Cache tools
+      uses: actions/cache@v4
+      with:
+        path: |
+          bin/
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}-tools-${{ hashFiles('Makefile') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
 
-    - name: Install dependencies
-      run: go mod download
-
-    - name: Build and Test
+    - name: Install tools
       run: |
-        # Run tests first (includes necessary codegen)
-        make test
+        echo "::group::Installing development tools"
+        make tools
+        echo "::endgroup::"
+
+    - name: Build and test
+      run: |
+        echo "::group::Building project"
+        make build
+        echo "::endgroup::"
         
-        # Build for current architecture
-        GOARCH=${{ matrix.arch }} make build-only
+        echo "::group::Running tests"
+        make test
+        echo "::endgroup::"

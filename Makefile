@@ -266,18 +266,23 @@ LOCALBIN ?= $(shell pwd)/bin
 bin_dir: ## Create bin directory
 	mkdir -p $(LOCALBIN)
 
-## Tool configurations
+## Tool Versions and Configurations
 TOOLS := kustomize controller-gen setup-envtest golangci-lint operator-sdk
-TOOL_PATHS := $(addprefix $(LOCALBIN)/,$(TOOLS))
+TOOL_VERSIONS := \
+    KUSTOMIZE=v5.4.3 \
+    CONTROLLER_GEN=v0.16.1 \
+    ENVTEST=release-0.19 \
+    GOLANGCI_LINT=v1.59.1 \
+    OPERATOR_SDK=v1.39.2
 
-# Tool versions
-KUSTOMIZE_VERSION := v5.4.3
-CONTROLLER_TOOLS_VERSION := v0.16.1
-ENVTEST_VERSION := release-0.19
-GOLANGCI_LINT_VERSION := v1.59.1
-OPERATOR_SDK_VERSION := v1.39.2
+# Build Architecture Settings
+BUILD_ARCH ?= $(shell go env GOARCH)
+ifeq ($(RUNNING_IN_CI),true)
+    # Force AMD64 in CI environment
+    BUILD_ARCH := amd64
+endif
 
-# Tool binaries
+# Tool Paths and URLs
 KUBECTL := kubectl
 KUSTOMIZE := $(LOCALBIN)/kustomize
 CONTROLLER_GEN := $(LOCALBIN)/controller-gen
@@ -285,45 +290,66 @@ ENVTEST := $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
 OPERATOR_SDK := $(LOCALBIN)/operator-sdk
 
-.PHONY: kustomize
-kustomize: bin_dir ## Download kustomize locally if necessary.
-	[ -f $(KUSTOMIZE) ] || $(call go-install-tool,$(KUSTOMIZE),sigs.k8s.io/kustomize/kustomize/v5,$(KUSTOMIZE_VERSION))
+# Tool URLs
+KUSTOMIZE_PKG := sigs.k8s.io/kustomize/kustomize/v5
+CONTROLLER_GEN_PKG := sigs.k8s.io/controller-tools/cmd/controller-gen
+ENVTEST_PKG := sigs.k8s.io/controller-runtime/tools/setup-envtest
+GOLANGCI_LINT_PKG := github.com/golangci/golangci-lint/cmd/golangci-lint
 
-.PHONY: controller-gen
-controller-gen: bin_dir ## Download controller-gen locally if necessary.
-	[ -f $(CONTROLLER_GEN) ] || $(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
+.PHONY: tools tools-verify kustomize controller-gen envtest golangci-lint
+tools: bin_dir ## Download and install all tools
+	@echo "Installing tools for $(BUILD_ARCH)..."
+	@$(MAKE) kustomize controller-gen envtest golangci-lint
+	@echo "All tools installed successfully!"
 
-.PHONY: envtest
-envtest: ## Download envtest-setup locally if necessary
-	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,release-0.19)
-	KUBEBUILDER_ASSETS=$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path) \
-	go test $(GO_TEST_FLAGS) $(shell go list ./... | grep -v /e2e) -coverprofile cover.out
+tools-verify: ## Verify all required tools are installed
+	@echo "Verifying tools..."
+	@for tool in $(TOOLS); do \
+		if [ ! -f "$(LOCALBIN)/$$tool" ]; then \
+			echo "❌ Missing tool: $$tool" ;\
+			exit 1 ;\
+		fi ;\
+	done
+	@echo "✓ All tools are installed"
 
-.PHONY: golangci-lint
-golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
-	[ -f $(GOLANGCI_LINT) ] || $(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+kustomize: bin_dir ## Install kustomize
+	$(call go-install-tool,$(KUSTOMIZE),$(KUSTOMIZE_PKG),v5.4.3)
+
+controller-gen: bin_dir ## Install controller-gen
+	$(call go-install-tool,$(CONTROLLER_GEN),$(CONTROLLER_GEN_PKG),v0.16.1)
+
+envtest: bin_dir ## Install envtest
+	$(call go-install-tool,$(ENVTEST),$(ENVTEST_PKG),release-0.19)
+
+golangci-lint: bin_dir ## Install golangci-lint
+	$(call go-install-tool,$(GOLANGCI_LINT),$(GOLANGCI_LINT_PKG),v1.59.1)
 
 # Install Go tools
 # params: binary-path package-url version
 define go-install-tool
-@[ -f "$(1)" ] || { \
+@{ \
+    if [ -f "$(1)" ]; then \
+        echo "Tool already installed: $(1)" ;\
+        exit 0 ;\
+    fi ;\
     set -e ;\
-    echo "Installing $(2)@$(3)..." ;\
+    echo "Installing $(2)@$(3) for $(BUILD_ARCH)..." ;\
     TEMP_DIR=$$(mktemp -d) ;\
     cd $$TEMP_DIR ;\
     GO111MODULE=on go mod init tmp ;\
     GO111MODULE=on go get $(2)@$(3) ;\
     BASE_NAME=$$(basename $(1)) ;\
-    BUILD_ARCH=$$(go env GOARCH) ;\
-    BINARY_NAME="$$BASE_NAME-$(3)-$$BUILD_ARCH" ;\
-    CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$$BUILD_ARCH go build -o "$$BINARY_NAME" $(2) ;\
+    BINARY_NAME="$$BASE_NAME-$(3)-$(BUILD_ARCH)" ;\
+    echo "Building $$BINARY_NAME..." ;\
+    CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(BUILD_ARCH) go build -o "$$BINARY_NAME" $(2) ;\
     mkdir -p $(LOCALBIN) ;\
     mv "$$BINARY_NAME" "$(LOCALBIN)/" ;\
     cd $(LOCALBIN) ;\
+    rm -f "$$BASE_NAME" ;\
     ln -sf "$$BINARY_NAME" "$$BASE_NAME" ;\
     cd $(WORKSPACE_DIR) ;\
     rm -rf $$TEMP_DIR ;\
-    echo "✓ Installed $$BASE_NAME" ;\
+    echo "✓ Installed $$BASE_NAME for $(BUILD_ARCH)" ;\
 }
 endef
 
