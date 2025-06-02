@@ -325,9 +325,10 @@ define go-install-tool
     GO111MODULE=on go mod init tmp ;\
     GO111MODULE=on go get $(2)@$(3) ;\
     BASE_NAME=$$(basename $(1)) ;\
-    ARCH_SUFFIX="-$(3)-$(GOARCH)" ;\
+    HOST_ARCH=$$(go env GOARCH) ;\
+    ARCH_SUFFIX="-$(3)-$$HOST_ARCH" ;\
     BINARY_NAME="$$BASE_NAME$$ARCH_SUFFIX" ;\
-    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$$HOST_ARCH \
     go build -o "$$BINARY_NAME" $(2) ;\
     if [ -f "$(LOCALBIN)/$$BINARY_NAME" ]; then \
         rm "$(LOCALBIN)/$$BINARY_NAME" ;\
