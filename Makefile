@@ -311,7 +311,7 @@ envtest: ## Download envtest-setup locally if necessary
 golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
 	[ -f $(GOLANGCI_LINT) ] || $(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
-# go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
+# go-install-tool will build any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
 # $2 - package url which can be installed
 # $3 - specific version of package
@@ -319,16 +319,17 @@ define go-install-tool
 [ -f "$(1)" ] || { \
     set -e ;\
     mkdir -p $(LOCALBIN) ;\
-    echo "Downloading and installing $(2)@$(3)" ;\
-    GOBIN=$(LOCALBIN) CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-    go install $(2)@$(3) ;\
-    if [ -f "$(LOCALBIN)/$$(basename $(2))" ]; then \
-        mv "$(LOCALBIN)/$$(basename $(2))" "$(1)-$(3)-$(GOARCH)" ;\
-        ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
-    else \
-        echo "Binary not found after installation" ;\
-        exit 1 ;\
-    fi \
+    echo "Downloading and building $(2)@$(3)" ;\
+    TEMP_DIR=$$(mktemp -d) ;\
+    cd $$TEMP_DIR ;\
+    GO111MODULE=on go mod init tmp ;\
+    GO111MODULE=on go get $(2)@$(3) ;\
+    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+    go build -o "$(1)-$(3)-$(GOARCH)" $(2) ;\
+    mv "$(1)-$(3)-$(GOARCH)" "$(LOCALBIN)/" ;\
+    cd $(WORKSPACE_DIR) ;\
+    rm -rf $$TEMP_DIR ;\
+    ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
 }
 endef
 
