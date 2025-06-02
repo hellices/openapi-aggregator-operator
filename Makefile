@@ -1,7 +1,17 @@
-# Common variables and settings
-ARCH ?= $(shell go env GOARCH)
+# ====================
+# Tool Installation
+# ====================
+
+# Tools will be installed to this directory
+LOCALBIN ?= $(shell pwd)/bin
+TOOLS_DIR := $(LOCALBIN)
+WORKSPACE_DIR ?= $(CURDIR)
+
+# Cross compilation settings
 GOOS ?= linux
-PLATFORMS ?= linux/arm64,linux/amd64
+GOARCH ?= $(shell go env GOARCH)
+CGO_ENABLED ?= 0
+COMMON_LDFLAGS ?= -s -w
 
 # Get the workspace directory
 WORKSPACE_DIR ?= $(shell pwd)
@@ -135,14 +145,19 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-.PHONY: test
+.PHONY: test test-e2e test-coverage
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out -v -race
 
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
-test-e2e:
+# Run e2e tests using Kind
+test-e2e: docker-build ## Run e2e tests against a Kind cluster
 	go test ./test/e2e/ -v -ginkgo.v
+
+# Run tests with coverage report
+test-coverage: test ## Run tests and generate coverage report
+	go tool cover -html=cover.out -o coverage.html
+	@echo "Coverage report generated at coverage.html"
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -154,22 +169,26 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 ##@ Build
 
-.PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
+.PHONY: build build-all
+build: manifests generate fmt vet ## Build manager binary for current architecture.
 	@mkdir -p bin
-	@if [ "$(GOARCH)" = "amd64" ] || [ "$(GOARCH)" = "" ]; then \
-		echo "Building amd64 binary..." ;\
-		GOOS=$(GOOS) GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_amd64 cmd/main.go ;\
-	fi
-	@if [ "$(GOARCH)" = "arm64" ] || [ "$(GOARCH)" = "" ]; then \
-		echo "Building arm64 binary..." ;\
-		GOOS=$(GOOS) GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" -o bin/manager_arm64 cmd/main.go ;\
-	fi
-	@if [ "$(GOARCH)" = "" ]; then \
-		ln -sf manager_$$(go env GOARCH) bin/manager ;\
-	else \
-		ln -sf manager_$(GOARCH) bin/manager ;\
-	fi
+	@echo "Building $(GOARCH) binary..."
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) go build \
+		-ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" \
+		-o bin/manager_$(GOARCH) cmd/main.go
+	@ln -sf manager_$(GOARCH) bin/manager
+
+build-all: manifests generate fmt vet ## Build manager binaries for all supported architectures.
+	@mkdir -p bin
+	@echo "Building amd64 binary..."
+	GOOS=$(GOOS) GOARCH=amd64 CGO_ENABLED=$(CGO_ENABLED) go build \
+		-ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" \
+		-o bin/manager_amd64 cmd/main.go
+	@echo "Building arm64 binary..."
+	GOOS=$(GOOS) GOARCH=arm64 CGO_ENABLED=$(CGO_ENABLED) go build \
+		-ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" \
+		-o bin/manager_arm64 cmd/main.go
+	@ln -sf manager_$$(go env GOARCH) bin/manager
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -295,23 +314,20 @@ golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
 # $3 - specific version of package
 define go-install-tool
 [ -f "$(1)" ] || { \
-set -e ;\
-mkdir -p $(LOCALBIN) ;\
-echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
-TEMP_DIR=$$(mktemp -d) ;\
-cd $$TEMP_DIR ;\
-GO111MODULE=on go mod init tmp ;\
-if [ "$$(go env GOOS)" = "linux" ] && [ "$$(go env GOARCH)" = "arm64" ]; then \
-  CGO_ENABLED=0 GOARCH=arm64 go build -o "$(1)-$(3)-arm64" $(2)@$(3) ;\
-elif [ "$$(go env GOOS)" = "linux" ] && [ "$$(go env GOARCH)" = "amd64" ]; then \
-  CGO_ENABLED=0 GOARCH=amd64 go build -o "$(1)-$(3)-amd64" $(2)@$(3) ;\
-else \
-  CGO_ENABLED=0 go build -o "$(1)-$(3)-$$(go env GOARCH)" $(2)@$(3) ;\
-fi ;\
-mv "$(1)-$(3)-$$(go env GOARCH)" "$(LOCALBIN)/" ;\
-cd $(WORKSPACE_DIR) ;\
-rm -rf $$TEMP_DIR ;\
-ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)" ;\
+    set -e ;\
+    mkdir -p $(LOCALBIN) ;\
+    echo "Downloading and building $(2)@$(3) for $(GOARCH)" ;\
+    TEMP_DIR=$$(mktemp -d) ;\
+    cd $$TEMP_DIR ;\
+    GO111MODULE=on go mod init tmp ;\
+    GO111MODULE=on go mod edit -go=1.21 ;\
+    GO111MODULE=on go get $(2)@$(3) ;\
+    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+    go build -ldflags "${COMMON_LDFLAGS}" -o "$(1)-$(3)-$(GOARCH)" $$(go list -f '{{.ImportPath}}' ./... | grep -e "^$(2)$$") ;\
+    mv "$(1)-$(3)-$(GOARCH)" "$(LOCALBIN)/" ;\
+    cd $(WORKSPACE_DIR) ;\
+    rm -rf $$TEMP_DIR ;\
+    ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
 }
 endef
 
@@ -391,8 +407,11 @@ catalog-push: ## Push a catalog image.
 ##@ Development tools
 
 .PHONY: install-tools
-install-tools: ## Install development tools
-	$(LOCALBIN)/controller-gen --version || $(MAKE) controller-gen
-	$(LOCALBIN)/kustomize --version || $(MAKE) kustomize
-	$(LOCALBIN)/envtest --version || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-	setup-envtest use --bin-dir $(LOCALBIN) 1.24.2
+install-tools: bin_dir ## Install all development tools
+	$(MAKE) controller-gen
+	$(MAKE) kustomize
+	$(MAKE) envtest
+	$(MAKE) golangci-lint
+	$(MAKE) operator-sdk
+	@echo "Installing envtest assets..."
+	$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)
