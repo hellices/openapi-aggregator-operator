@@ -324,18 +324,21 @@ define go-install-tool
     cd $$TEMP_DIR ;\
     GO111MODULE=on go mod init tmp ;\
     GO111MODULE=on go get $(2)@$(3) ;\
+    BASE_NAME=$$(basename $(1)) ;\
+    ARCH_SUFFIX="-$(3)-$(GOARCH)" ;\
+    BINARY_NAME="$$BASE_NAME$$ARCH_SUFFIX" ;\
     CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-    go build -o "$(1)-$(3)-$(GOARCH)" $(2) ;\
-    if [ -f "$(LOCALBIN)/$$(basename $(1))-$(3)-$(GOARCH)" ]; then \
-        rm "$(LOCALBIN)/$$(basename $(1))-$(3)-$(GOARCH)" ;\
+    go build -o "$$BINARY_NAME" $(2) ;\
+    if [ -f "$(LOCALBIN)/$$BINARY_NAME" ]; then \
+        rm "$(LOCALBIN)/$$BINARY_NAME" ;\
     fi ;\
-    mv "$(1)-$(3)-$(GOARCH)" "$(LOCALBIN)/" ;\
-    cd $(WORKSPACE_DIR) ;\
-    rm -rf $$TEMP_DIR ;\
+    mv "$$BINARY_NAME" "$(LOCALBIN)/" ;\
+    cd "$(WORKSPACE_DIR)" ;\
+    rm -rf "$$TEMP_DIR" ;\
     if [ -L "$(1)" ]; then \
         rm "$(1)" ;\
     fi ;\
-    ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
+    cd "$(LOCALBIN)" && ln -sf "$$BINARY_NAME" "$$BASE_NAME" ;\
 }
 endef
 
