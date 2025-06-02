@@ -291,8 +291,9 @@ golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
 # $2 - package url which can be installed
 # $3 - specific version of package
 define go-install-tool
-[ -f "$(1)-$(3)-$$(go env GOARCH)" ] || { \
+[ -f "$(1)" ] || { \
 set -e ;\
+mkdir -p $$(dirname $(1)) ;\
 echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
 ORIG_DIR=$$(pwd) ;\
 TEMP_DIR=$$(mktemp -d) ;\
@@ -300,10 +301,14 @@ cd $$TEMP_DIR ;\
 GO111MODULE=on go mod init tmp ;\
 GO111MODULE=on GOBIN=$$ORIG_DIR/$$(dirname $(1)) go install $(2)@$(3) ;\
 cd $$ORIG_DIR ;\
-mv "$$(dirname $(1))/$$(basename $(1))" "$(1)-$(3)-$$(go env GOARCH)" ;\
+if [ -f "$$(dirname $(1))/$$(basename $(1))" ]; then \
+  mv "$$(dirname $(1))/$$(basename $(1))" "$(1)-$(3)-$$(go env GOARCH)" ;\
+fi ;\
 rm -rf $$TEMP_DIR ;\
 } ;\
-ln -sf "$(1)-$(3)-$$(go env GOARCH)" "$(1)"
+if [ -f "$(1)-$(3)-$$(go env GOARCH)" ]; then \
+  ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)" ;\
+fi
 endef
 
 .PHONY: operator-sdk

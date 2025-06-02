@@ -25,6 +25,11 @@ jobs:
         go mod download
         go mod verify
 
+    - name: Setup bin directory
+      run: |
+        mkdir -p bin
+        chmod 755 bin
+
     - name: Run tests
       run: make test
 
@@ -47,7 +52,11 @@ jobs:
     - name: Install dependencies
       run: go mod download
 
+    - name: Setup bin directory
+      run: |
+        mkdir -p bin
+        chmod 755 bin
+
     - name: Build for ${{ matrix.arch }}
       run: |
         GOARCH=${{ matrix.arch }} make build
-        mv bin/manager bin/manager-${{ matrix.arch }}
