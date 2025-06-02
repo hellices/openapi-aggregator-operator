@@ -322,8 +322,9 @@ define go-install-tool
     GO111MODULE=on go mod init tmp ;\
     GO111MODULE=on go mod edit -go=1.21 ;\
     GO111MODULE=on go get $(2)@$(3) ;\
+    PKG_PATH=$$(GO111MODULE=on go list -f '{{.ImportPath}}' -m $(2)) ;\
     CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-    go build -ldflags "${COMMON_LDFLAGS}" -o "$(1)-$(3)-$(GOARCH)" $$(go list -f '{{.ImportPath}}' ./... | grep -e "^$(2)$$") ;\
+    go build -ldflags "${COMMON_LDFLAGS}" -o "$(1)-$(3)-$(GOARCH)" $$PKG_PATH ;\
     mv "$(1)-$(3)-$(GOARCH)" "$(LOCALBIN)/" ;\
     cd $(WORKSPACE_DIR) ;\
     rm -rf $$TEMP_DIR ;\
