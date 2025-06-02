@@ -326,9 +326,15 @@ define go-install-tool
     GO111MODULE=on go get $(2)@$(3) ;\
     CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
     go build -o "$(1)-$(3)-$(GOARCH)" $(2) ;\
+    if [ -f "$(LOCALBIN)/$$(basename $(1))-$(3)-$(GOARCH)" ]; then \
+        rm "$(LOCALBIN)/$$(basename $(1))-$(3)-$(GOARCH)" ;\
+    fi ;\
     mv "$(1)-$(3)-$(GOARCH)" "$(LOCALBIN)/" ;\
     cd $(WORKSPACE_DIR) ;\
     rm -rf $$TEMP_DIR ;\
+    if [ -L "$(1)" ]; then \
+        rm "$(1)" ;\
+    fi ;\
     ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
 }
 endef
