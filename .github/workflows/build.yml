@@ -6,6 +6,7 @@ on:
 
 env:
   GO_VERSION: '1.22'
+  WORKSPACE_DIR: ${{ github.workspace }}
 
 jobs:
   test:
@@ -25,10 +26,11 @@ jobs:
         go mod download
         go mod verify
 
-    - name: Setup bin directory
+    - name: Setup build environment
       run: |
-        mkdir -p bin
-        chmod 755 bin
+        mkdir -p ${{ env.WORKSPACE_DIR }}/bin
+        chmod 755 ${{ env.WORKSPACE_DIR }}/bin
+        echo "WORKSPACE_DIR=${{ env.WORKSPACE_DIR }}" >> $GITHUB_ENV
 
     - name: Run tests
       run: make test
@@ -49,13 +51,11 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Install dependencies
-      run: go mod download
-
-    - name: Setup bin directory
+    - name: Setup build environment
       run: |
-        mkdir -p bin
-        chmod 755 bin
+        mkdir -p ${{ env.WORKSPACE_DIR }}/bin
+        chmod 755 ${{ env.WORKSPACE_DIR }}/bin
+        echo "WORKSPACE_DIR=${{ env.WORKSPACE_DIR }}" >> $GITHUB_ENV
 
     - name: Build for ${{ matrix.arch }}
       run: |
