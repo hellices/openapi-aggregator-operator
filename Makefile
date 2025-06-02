@@ -169,8 +169,11 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 
 ##@ Build
 
-.PHONY: build build-all
+.PHONY: build build-only build-all
 build: manifests generate fmt vet ## Build manager binary for current architecture.
+	@$(MAKE) build-only
+
+build-only: ## Build manager binary without preprocessing steps
 	@mkdir -p bin
 	@echo "Building $(GOARCH) binary..."
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) go build \
@@ -316,19 +319,16 @@ define go-install-tool
 [ -f "$(1)" ] || { \
     set -e ;\
     mkdir -p $(LOCALBIN) ;\
-    echo "Downloading and building $(2)@$(3) for $(GOARCH)" ;\
-    TEMP_DIR=$$(mktemp -d) ;\
-    cd $$TEMP_DIR ;\
-    GO111MODULE=on go mod init tmp ;\
-    GO111MODULE=on go mod edit -go=1.21 ;\
-    GO111MODULE=on go get $(2)@$(3) ;\
-    PKG_PATH=$$(GO111MODULE=on go list -f '{{.ImportPath}}' -m $(2)) ;\
-    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
-    go build -ldflags "${COMMON_LDFLAGS}" -o "$(1)-$(3)-$(GOARCH)" $$PKG_PATH ;\
-    mv "$(1)-$(3)-$(GOARCH)" "$(LOCALBIN)/" ;\
-    cd $(WORKSPACE_DIR) ;\
-    rm -rf $$TEMP_DIR ;\
-    ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
+    echo "Downloading and installing $(2)@$(3)" ;\
+    GOBIN=$(LOCALBIN) CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) \
+    go install $(2)@$(3) ;\
+    if [ -f "$(LOCALBIN)/$$(basename $(2))" ]; then \
+        mv "$(LOCALBIN)/$$(basename $(2))" "$(1)-$(3)-$(GOARCH)" ;\
+        ln -sf "$$(basename $(1))-$(3)-$(GOARCH)" "$(1)" ;\
+    else \
+        echo "Binary not found after installation" ;\
+        exit 1 ;\
+    fi \
 }
 endef
 

@@ -8,33 +8,7 @@ env:
   GO_VERSION: '1.22'
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-
-    - name: Install dependencies
-      run: |
-        go mod download
-        go mod verify
-
-    - name: Setup environment
-      run: |
-        mkdir -p bin
-        chmod 755 bin
-
-    - name: Run tests
-      run: make test
-
-  build:
-    needs: test
+  build-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -49,7 +23,7 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
         cache: true
 
-    - name: Setup build environment
+    - name: Setup environment
       run: |
         mkdir -p bin
         chmod 755 bin
@@ -57,7 +31,13 @@ jobs:
         echo "CGO_ENABLED=0" >> $GITHUB_ENV
         echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
 
-    - name: Build binary
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Build and Test
       run: |
-        go mod download
-        GOARCH=${{ matrix.arch }} make build
+        # Run tests first (includes necessary codegen)
+        make test
+        
+        # Build for current architecture
+        GOARCH=${{ matrix.arch }} make build-only
