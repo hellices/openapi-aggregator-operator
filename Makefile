@@ -10,6 +10,7 @@ WORKSPACE_DIR ?= $(CURDIR)
 # Cross compilation settings
 GOOS ?= linux
 GOARCH ?= $(shell go env GOARCH)
+HOST_ARCH ?= $(shell go env GOARCH)
 CGO_ENABLED ?= 0
 COMMON_LDFLAGS ?= -s -w
 
@@ -175,11 +176,11 @@ build: manifests generate fmt vet ## Build manager binary for current architectu
 
 build-only: ## Build manager binary without preprocessing steps
 	@mkdir -p bin
-	@echo "Building $(GOARCH) binary..."
+	@echo "Building for GOARCH=$(GOARCH)..."
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=$(CGO_ENABLED) go build \
 		-ldflags "${COMMON_LDFLAGS} ${OPERATOR_LDFLAGS}" \
 		-o bin/manager_$(GOARCH) cmd/main.go
-	@ln -sf manager_$(GOARCH) bin/manager
+	@cd bin && ln -sf manager_$$(go env GOARCH) manager
 
 build-all: manifests generate fmt vet ## Build manager binaries for all supported architectures.
 	@mkdir -p bin
@@ -319,16 +320,17 @@ define go-install-tool
 [ -f "$(1)" ] || { \
     set -e ;\
     mkdir -p $(LOCALBIN) ;\
-    echo "Downloading and building $(2)@$(3)" ;\
+    echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
     TEMP_DIR=$$(mktemp -d) ;\
     cd $$TEMP_DIR ;\
     GO111MODULE=on go mod init tmp ;\
     GO111MODULE=on go get $(2)@$(3) ;\
     BASE_NAME=$$(basename $(1)) ;\
-    HOST_ARCH=$$(go env GOARCH) ;\
-    ARCH_SUFFIX="-$(3)-$$HOST_ARCH" ;\
+    BUILD_ARCH=$$(go env GOARCH) ;\
+    ARCH_SUFFIX="-$(3)-$$BUILD_ARCH" ;\
     BINARY_NAME="$$BASE_NAME$$ARCH_SUFFIX" ;\
-    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$$HOST_ARCH \
+    echo "Building $$BINARY_NAME..." ;\
+    CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$$BUILD_ARCH \
     go build -o "$$BINARY_NAME" $(2) ;\
     if [ -f "$(LOCALBIN)/$$BINARY_NAME" ]; then \
         rm "$(LOCALBIN)/$$BINARY_NAME" ;\
@@ -336,10 +338,12 @@ define go-install-tool
     mv "$$BINARY_NAME" "$(LOCALBIN)/" ;\
     cd "$(WORKSPACE_DIR)" ;\
     rm -rf "$$TEMP_DIR" ;\
-    if [ -L "$(1)" ]; then \
-        rm "$(1)" ;\
+    cd "$(LOCALBIN)" ;\
+    if [ -L "$$BASE_NAME" ]; then \
+        rm "$$BASE_NAME" ;\
     fi ;\
-    cd "$(LOCALBIN)" && ln -sf "$$BINARY_NAME" "$$BASE_NAME" ;\
+    ln -sf "$$BINARY_NAME" "$$BASE_NAME" ;\
+    echo "Created symlink: $$BASE_NAME -> $$BINARY_NAME" ;\
 }
 endef
 
