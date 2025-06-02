@@ -30,7 +30,6 @@ jobs:
       run: |
         mkdir -p ${{ env.WORKSPACE_DIR }}/bin
         chmod 755 ${{ env.WORKSPACE_DIR }}/bin
-        echo "WORKSPACE_DIR=${{ env.WORKSPACE_DIR }}" >> $GITHUB_ENV
 
     - name: Run tests
       run: make test
@@ -55,8 +54,9 @@ jobs:
       run: |
         mkdir -p ${{ env.WORKSPACE_DIR }}/bin
         chmod 755 ${{ env.WORKSPACE_DIR }}/bin
-        echo "WORKSPACE_DIR=${{ env.WORKSPACE_DIR }}" >> $GITHUB_ENV
+        echo "GOOS=linux" >> $GITHUB_ENV
+        echo "CGO_ENABLED=0" >> $GITHUB_ENV
+        echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
 
     - name: Build for ${{ matrix.arch }}
-      run: |
-        GOARCH=${{ matrix.arch }} make build
+      run: make build

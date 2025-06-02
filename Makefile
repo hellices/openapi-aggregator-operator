@@ -301,16 +301,16 @@ echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
 TEMP_DIR=$$(mktemp -d) ;\
 cd $$TEMP_DIR ;\
 GO111MODULE=on go mod init tmp ;\
-GO111MODULE=on GOBIN=$(WORKSPACE_DIR)/bin go install $(2)@$(3) ;\
-if [ -f "$(WORKSPACE_DIR)/bin/$$(basename $(1))" ]; then \
-  mv "$(WORKSPACE_DIR)/bin/$$(basename $(1))" "$(1)-$(3)-$$(go env GOARCH)" ;\
-fi ;\
+case "$$(go env GOHOSTOS)" in \
+  darwin) \
+    CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go build -o $(1)-$(3)-$$(go env GOARCH) $(2)@$(3) ;; \
+  linux) \
+    CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOARCH) go build -o $(1)-$(3)-$$(go env GOARCH) $(2)@$(3) ;; \
+esac ;\
 cd $(WORKSPACE_DIR) ;\
 rm -rf $$TEMP_DIR ;\
 } ;\
-if [ -f "$(1)-$(3)-$$(go env GOARCH)" ]; then \
-  ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)" ;\
-fi
+ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)"
 endef
 
 .PHONY: operator-sdk
