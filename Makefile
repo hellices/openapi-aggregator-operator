@@ -296,21 +296,23 @@ golangci-lint: bin_dir ## Download golangci-lint locally if necessary.
 define go-install-tool
 [ -f "$(1)" ] || { \
 set -e ;\
-mkdir -p $(WORKSPACE_DIR)/bin ;\
+mkdir -p $(LOCALBIN) ;\
 echo "Downloading and building $(2)@$(3) for $$(go env GOARCH)" ;\
 TEMP_DIR=$$(mktemp -d) ;\
 cd $$TEMP_DIR ;\
 GO111MODULE=on go mod init tmp ;\
-GO111MODULE=on GOBIN=$(WORKSPACE_DIR)/bin go install $(2)@$(3) ;\
-if [ -f "$(WORKSPACE_DIR)/bin/$$(basename $(1))" ]; then \
-  mv "$(WORKSPACE_DIR)/bin/$$(basename $(1))" "$(1)-$(3)-$$(go env GOARCH)" ;\
+if [ "$$(go env GOOS)" = "linux" ] && [ "$$(go env GOARCH)" = "arm64" ]; then \
+  CGO_ENABLED=0 GOARCH=arm64 go build -o "$(1)-$(3)-arm64" $(2)@$(3) ;\
+elif [ "$$(go env GOOS)" = "linux" ] && [ "$$(go env GOARCH)" = "amd64" ]; then \
+  CGO_ENABLED=0 GOARCH=amd64 go build -o "$(1)-$(3)-amd64" $(2)@$(3) ;\
+else \
+  CGO_ENABLED=0 go build -o "$(1)-$(3)-$$(go env GOARCH)" $(2)@$(3) ;\
 fi ;\
+mv "$(1)-$(3)-$$(go env GOARCH)" "$(LOCALBIN)/" ;\
 cd $(WORKSPACE_DIR) ;\
 rm -rf $$TEMP_DIR ;\
-} ;\
-if [ -f "$(1)-$(3)-$$(go env GOARCH)" ]; then \
-  ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)" ;\
-fi
+ln -sf "$$(basename $(1))-$(3)-$$(go env GOARCH)" "$(1)" ;\
+}
 endef
 
 .PHONY: operator-sdk

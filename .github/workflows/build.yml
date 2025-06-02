@@ -6,7 +6,6 @@ on:
 
 env:
   GO_VERSION: '1.22'
-  WORKSPACE_DIR: ${{ github.workspace }}
 
 jobs:
   test:
@@ -26,10 +25,10 @@ jobs:
         go mod download
         go mod verify
 
-    - name: Setup build environment
+    - name: Setup environment
       run: |
-        mkdir -p ${{ env.WORKSPACE_DIR }}/bin
-        chmod 755 ${{ env.WORKSPACE_DIR }}/bin
+        mkdir -p bin
+        chmod 755 bin
 
     - name: Run tests
       run: make test
@@ -52,11 +51,13 @@ jobs:
 
     - name: Setup build environment
       run: |
-        mkdir -p ${{ env.WORKSPACE_DIR }}/bin
-        chmod 755 ${{ env.WORKSPACE_DIR }}/bin
+        mkdir -p bin
+        chmod 755 bin
         echo "GOOS=linux" >> $GITHUB_ENV
         echo "CGO_ENABLED=0" >> $GITHUB_ENV
         echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
 
-    - name: Build for ${{ matrix.arch }}
-      run: make build
+    - name: Build binary
+      run: |
+        go mod download
+        GOARCH=${{ matrix.arch }} make build
