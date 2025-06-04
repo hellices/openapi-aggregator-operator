@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -128,32 +129,51 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch the spec in real-time
-	url := metadata.URL
+	urlStr := metadata.URL
 	if os.Getenv("DEV_MODE") == "true" {
 		// In development mode, rewrite any cluster URLs to localhost:8080
-		if strings.Contains(url, ".svc.cluster.local:8080") {
-			url = "http://localhost:8080" + strings.Split(url, ".svc.cluster.local:8080")[1]
+		if strings.Contains(urlStr, ".svc.cluster.local:8080") {
+			urlStr = "http://localhost:8080" + strings.Split(urlStr, ".svc.cluster.local:8080")[1]
 		}
 	}
-	resp, err := http.Get(url)
+	resp, err := http.Get(urlStr)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Failed to close response body: %v", err)
-		}
-	}()
+	if resp != nil {
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("Failed to close response body: %v", err)
+			}
+		}()
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec, status: %d", resp.StatusCode), resp.StatusCode)
 		return
 	}
 
+	// Parse metadata URL to get the server URL
+	metadataURL, err := url.Parse(metadata.URL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse metadata URL: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Read and parse the OpenAPI/Swagger spec
+	var spec map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&spec); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to decode OpenAPI spec: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Update spec based on OpenAPI/Swagger version
+	s.updateSpecServerInfo(spec, metadataURL)
+
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		http.Error(w, "Failed to copy response", http.StatusInternalServerError)
+	if err := json.NewEncoder(w).Encode(spec); err != nil {
+		http.Error(w, "Failed to encode modified spec", http.StatusInternalServerError)
 	}
 }
 
@@ -222,12 +242,138 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveSpecs(w, r)
 	case strings.HasPrefix(path, "/api/"):
 		s.serveIndividualSpec(w, r)
+	case strings.HasPrefix(path, "/proxy/"):
+		s.proxyRequest(w, r)
 	default:
 		s.serveStaticFiles(w, r)
 	}
 }
 
-//TODO: swagger에서 보내는 요청을 모두 server.go로 리다이렉트하는 기능 추가. 서버는 이걸 받아서 proxy 요청을 보내는 기능을 구현해야 함.
+// proxyRequest handles proxy requests by forwarding them to the target URL
+func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request) {
+	var proxyURL string
+	var reqBody io.Reader
+
+	proxyURL = r.URL.Query().Get("proxyUrl")
+	if proxyURL == "" {
+		http.Error(w, "proxyUrl query parameter is required for all requests", http.StatusBadRequest)
+		return
+	}
+	reqBody = nil
+
+	// Get the path after /proxy/ and combine with proxyURL if needed
+	originalPath := strings.TrimPrefix(r.URL.Path, "/proxy/")
+	targetURL := proxyURL
+	// Fetch the spec in real-time
+	if os.Getenv("DEV_MODE") == "true" {
+		// In development mode, rewrite any cluster URLs to localhost:8080
+		if strings.Contains(targetURL, ".svc.cluster.local:8080") {
+			targetURL = "http://localhost:8080" + strings.Split(targetURL, ".svc.cluster.local:8080")[1]
+		}
+	}
+
+	if originalPath != "" {
+		targetURL = fmt.Sprintf("%s/%s", proxyURL, originalPath)
+	}
+
+	// Create new request with the same method and modified body
+	proxyReq, err := http.NewRequest(r.Method, targetURL, reqBody)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create proxy request: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Copy headers from original request
+	for key, values := range r.Header {
+		for _, value := range values {
+			proxyReq.Header.Add(key, value)
+		}
+	}
+
+	// Forward the request
+	client := &http.Client{}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		fmt.Printf("Error forwarding request: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to forward request: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}()
+
+	// Copy response headers
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	// Set response status code
+	w.WriteHeader(resp.StatusCode)
+
+	// Copy response body
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("Error copying response body: %v", err)
+	}
+}
+
+// makeServerURL creates a server URL by combining metadata URL with an optional path from existing URL
+func (s *Server) makeServerURL(metadataURL *url.URL, existingURL string) string {
+	if existingURL == "" {
+		return fmt.Sprintf("%s://%s", metadataURL.Scheme, metadataURL.Host)
+	}
+
+	if parsedURL, err := url.Parse(existingURL); err == nil && parsedURL.Path != "" {
+		return fmt.Sprintf("%s://%s%s", metadataURL.Scheme, metadataURL.Host, parsedURL.Path)
+	}
+
+	return fmt.Sprintf("%s://%s", metadataURL.Scheme, metadataURL.Host)
+}
+
+// updateSpecServerInfo updates the server information in the OpenAPI spec based on its version
+func (s *Server) updateSpecServerInfo(spec map[string]interface{}, metadataURL *url.URL) {
+	openAPIVersion, _ := spec["openapi"].(string)
+	swaggerVersion, _ := spec["swagger"].(string)
+
+	// OpenAPI 3.x
+	if openAPIVersion != "" && strings.HasPrefix(openAPIVersion, "3.") {
+		existingServers, _ := spec["servers"].([]interface{})
+		newServers := make([]interface{}, 0)
+
+		// If there are existing servers, get the URI part from the first server
+		if len(existingServers) > 0 {
+			if firstServer, ok := existingServers[0].(map[string]interface{}); ok {
+				if serverURL, ok := firstServer["url"].(string); ok {
+					newServers = append(newServers, map[string]interface{}{
+						"url": s.makeServerURL(metadataURL, serverURL),
+					})
+				}
+			}
+		}
+
+		// If we couldn't get URI from existing servers, add just the host
+		if len(newServers) == 0 {
+			newServers = append(newServers, map[string]interface{}{
+				"url": s.makeServerURL(metadataURL, ""),
+			})
+		}
+
+		// Append existing servers
+		newServers = append(newServers, existingServers...)
+		spec["servers"] = newServers
+
+	} else if swaggerVersion == "2.0" { // Swagger/OpenAPI 2.0
+		spec["host"] = metadataURL.Host
+
+	} else { // Swagger 1.2 or undefined
+		if basePath, ok := spec["basePath"].(string); ok {
+			spec["basePath"] = s.makeServerURL(metadataURL, basePath)
+		}
+	}
+}
 
 // Start starts the Swagger UI server
 func (s *Server) Start(port int) error {

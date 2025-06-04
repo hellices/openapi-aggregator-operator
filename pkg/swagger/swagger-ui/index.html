@@ -48,6 +48,27 @@
             maxRetries: 10
         };
 
+        // Request interceptor function
+        async function requestInterceptor(request) {
+            // swagger-ui의 내부 요청이나 static 파일 요청은 가로채지 않음
+            if (request.url.includes(window.location.host)) {
+                return request;
+            }
+
+            try {
+                // 프록시 URL로 변환
+                const proxyUrl = new URL(`${window.location.origin}/proxy/`);
+                proxyUrl.searchParams.set('proxyUrl', request.url);
+                
+                // 원본 request의 URL만 수정
+                request.url = proxyUrl.toString();
+                return request;
+            } catch (error) {
+                console.error('Proxy request failed:', error);
+                throw error;
+            }
+        }
+
         // UI Elements
         const elements = {
             get namespaceList() { return document.getElementById('namespaceList'); },
@@ -207,7 +228,8 @@
                         plugins: [
                             SwaggerUIBundle.plugins.DownloadUrl
                         ],
-                        layout: "BaseLayout"
+                        layout: "BaseLayout",
+                        requestInterceptor // requestInterceptor 추가
                     });
                 }
                 return state.swaggerUI;
@@ -273,12 +295,15 @@
                         plugins: [
                             SwaggerUIBundle.plugins.DownloadUrl
                         ],
-                        layout: "BaseLayout"
+                        layout: "BaseLayout",
+                        requestInterceptor // requestInterceptor 추가
                     });
                 } catch (error) {
                     uiManager.showError(error);
                 }
-            }
+            },
+
+
         };
 
         // Event Handlers
