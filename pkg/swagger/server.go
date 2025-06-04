@@ -141,11 +141,13 @@ func (s *Server) serveIndividualSpec(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Printf("Failed to close response body: %v", err)
-		}
-	}()
+	if resp != nil {
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Printf("Failed to close response body: %v", err)
+			}
+		}()
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		http.Error(w, fmt.Sprintf("Failed to fetch spec, status: %d", resp.StatusCode), resp.StatusCode)
@@ -254,7 +256,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	proxyURL = r.URL.Query().Get("proxyUrl")
 	if proxyURL == "" {
-		http.Error(w, "proxyUrl query parameter is required for GET/HEAD requests", http.StatusBadRequest)
+		http.Error(w, "proxyUrl query parameter is required for all requests", http.StatusBadRequest)
 		return
 	}
 	reqBody = nil
@@ -296,7 +298,11 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Failed to forward request: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("Error closing response body: %v", err)
+		}
+	}()
 
 	// Copy response headers
 	for key, values := range resp.Header {
