@@ -5,17 +5,42 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ""
   resources:
-  - services
+  - configmaps
   verbs:
   - get
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - observability.aggregator.io
   resources:
   - openapiaggregators
+  - swaggerservers
   verbs:
   - create
   - delete
@@ -28,12 +53,14 @@ rules:
   - observability.aggregator.io
   resources:
   - openapiaggregators/finalizers
+  - swaggerservers/finalizers
   verbs:
   - update
 - apiGroups:
   - observability.aggregator.io
   resources:
   - openapiaggregators/status
+  - swaggerservers/status
   verbs:
   - get
   - patch

@@ -18,12 +18,14 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -33,15 +35,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
-	"github.com/hellices/openapi-aggregator-operator/pkg/swagger"
 )
 
 // OpenAPIAggregatorReconciler reconciles a OpenAPIAggregator object
 type OpenAPIAggregatorReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	swaggerServer *swagger.Server
-	TestMode      bool
+	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators,verbs=get;list;watch;create;update;patch;delete
@@ -99,8 +98,52 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{}, retryErr
 	}
 
-	// Update Swagger UI with collected specs
-	r.swaggerServer.UpdateSpecs(collectedAPIs)
+	// Create or update ConfigMap with collected specs
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "openapi-specs",
+			Namespace: req.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: instance.APIVersion,
+					Kind:       instance.Kind,
+					Name:       instance.Name,
+					UID:        instance.UID,
+					Controller: &[]bool{true}[0],
+				},
+			},
+		},
+		Data: map[string]string{},
+	}
+
+	// Convert collected APIs to JSON and store in ConfigMap
+	for _, api := range collectedAPIs {
+		apiJSON, err := json.Marshal(api)
+		if err != nil {
+			logger.Error(err, "Failed to marshal API info", "api", api.Name)
+			continue
+		}
+		cm.Data[api.Name] = string(apiJSON)
+	}
+
+	// Create or update ConfigMap
+	err = r.Client.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, &corev1.ConfigMap{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err = r.Client.Create(ctx, cm); err != nil {
+				logger.Error(err, "Failed to create ConfigMap")
+				return ctrl.Result{}, err
+			}
+		} else {
+			logger.Error(err, "Failed to get ConfigMap")
+			return ctrl.Result{}, err
+		}
+	} else {
+		if err = r.Client.Update(ctx, cm); err != nil {
+			logger.Error(err, "Failed to update ConfigMap")
+			return ctrl.Result{}, err
+		}
+	}
 
 	logger.V(1).Info("Reconciliation completed", "collectedAPIs", len(collectedAPIs))
 
@@ -205,17 +248,6 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Initialize Swagger UI server
-	if r.swaggerServer == nil && !r.TestMode {
-		r.swaggerServer = swagger.NewServer()
-		go func() {
-			log.Log.Info("Starting Swagger UI server on HTTP port 9090")
-			if err := r.swaggerServer.Start(9090); err != nil {
-				log.Log.Error(err, "Failed to start Swagger UI server")
-			}
-		}()
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&observabilityv1alpha1.OpenAPIAggregator{}).
 		Watches(

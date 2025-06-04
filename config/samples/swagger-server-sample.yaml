@@ -1,0 +1,46 @@
+# Sample SwaggerServer configuration for hosting the Swagger UI component
+apiVersion: observability.aggregator.io/v1alpha1
+kind: SwaggerServer
+metadata:
+  name: swagger-ui
+  namespace: default
+  labels:
+    app: swagger-ui
+spec:
+  # Image configuration for the Swagger UI server
+  image: ghcr.io/hellices/openapi-aggregator-operator:latest  # Use specific version in production
+  imagePullPolicy: IfNotPresent
+
+  # Port configuration
+  port: 9090  # Default port for Swagger UI
+
+  # Base path configuration for Ingress/Route integration
+  basePath: /swagger-ui  # Remove if not using Ingress/Route
+
+  # ConfigMap reference for OpenAPI specs
+  configMapName: openapi-specs  # Created by OpenAPIAggregator
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+
+  # Optional: Node placement configuration
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
