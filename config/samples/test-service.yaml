@@ -8,7 +8,7 @@ metadata:
     openapi.aggregator.io/swagger: "true"
     openapi.aggregator.io/path: "/api/swagger.json"  # 옵션
     openapi.aggregator.io/port: "8080"  # 옵션
-    openapi.aggregator.io/allowed-methods: "get"  # get만 허용, 'get,post'처럼 쉼표로 구분하여 여러 메서드 허용 가능
+    openapi.aggregator.io/allowed-methods: "get,post"  # get만 허용, 'get,post'처럼 쉼표로 구분하여 여러 메서드 허용 가능
 spec:
   ports:
   - port: 8080

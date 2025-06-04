@@ -148,6 +148,11 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 		}
 	}
 
+	// Ensure path starts with "/"
+	if path != "" && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
 	// Create API info
 	apiInfo := &observabilityv1alpha1.APIInfo{
 		Name:           svc.Name,

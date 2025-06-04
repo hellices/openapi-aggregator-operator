@@ -47,6 +47,11 @@ spec:
           spec:
             description: OpenAPIAggregatorSpec defines the desired state of OpenAPIAggregator
             properties:
+              allowedMethodsAnnotation:
+                default: openapi.aggregator.io/allowed-methods
+                description: AllowedMethodsAnnotation is the annotation key for allowed
+                  HTTP methods in Swagger UI
+                type: string
               defaultPath:
                 default: /v2/api-docs
                 description: DefaultPath is the default path for OpenAPI documentation
@@ -85,6 +90,12 @@ spec:
                   description: APIInfo contains information about a collected OpenAPI
                     spec
                   properties:
+                    allowedMethods:
+                      description: AllowedMethods stores the allowed HTTP methods
+                        for Swagger UI
+                      items:
+                        type: string
+                      type: array
                     annotations:
                       additionalProperties:
                         type: string
@@ -437,7 +448,7 @@ spec:
         - --metrics-bind-address=:8080
         command:
         - /manager
-        image: ghcr.io/hellices/openapi-aggregator-operator:0.1.0
+        image: ghcr.io/hellices/openapi-aggregator-operator:0.2.0
         livenessProbe:
           httpGet:
             path: /healthz

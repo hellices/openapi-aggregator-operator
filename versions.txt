@@ -3,4 +3,4 @@
 # The version numbers are used during the build process
 
 # Represents the current release of the OpenAPI Aggregator Operator
-operator=0.1.0
+operator=0.2.0
