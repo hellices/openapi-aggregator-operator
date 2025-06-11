@@ -8,18 +8,16 @@ metadata:
     app: swagger-ui
 spec:
   # Image configuration for the Swagger UI server
-  image: ghcr.io/hellices/openapi-aggregator-operator:latest  # Use specific version in production
+  # If not specified, defaults to "ghcr.io/hellices/openapi-multi-swagger:latest".
+  # image: ghcr.io/hellices/openapi-multi-swagger:latest  # Example, or leave blank for default
   imagePullPolicy: IfNotPresent
-
+  
   # Port configuration
   port: 9090  # Default port for Swagger UI
-
-  # Base path configuration for Ingress/Route integration
-  basePath: /swagger-ui  # Remove if not using Ingress/Route
-
+  
   # ConfigMap reference for OpenAPI specs
   configMapName: openapi-specs  # Created by OpenAPIAggregator
-
+  
   # Resource limits and requests
   resources:
     limits:
@@ -29,18 +27,19 @@ spec:
       cpu: "100m"
       memory: "128Mi"
 
-  # Pod security context
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65532
-    runAsGroup: 65532
-    readOnlyRootFilesystem: true
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-      - ALL
+  # WatchIntervalSeconds is the interval in seconds for the server to check for updates to the ConfigMap.
+  # Defaults to "10".
+  # +optional
+  watchIntervalSeconds: "15"
 
-  # Optional: Node placement configuration
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
+  # LogLevel is the logging level for the Swagger UI server.
+  # Valid values are: "trace", "debug", "info", "warn", "error", "fatal", "panic".
+  # Defaults to "info".
+  # +optional
+  logLevel: "debug"
+
+  # DevMode enables or disables development mode for the Swagger UI server, which provides more verbose logging.
+  # Valid values are: "true", "false".
+  # Defaults to "false".
+  # +optional
+  # devMode: "true"

@@ -22,32 +22,52 @@ import (
 
 // SwaggerServerSpec defines the desired state of SwaggerServer
 type SwaggerServerSpec struct {
-	// Port is the port number the Swagger UI server will listen on
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=65535
-	// +kubebuilder:default=9090
-	Port int32 `json:"port,omitempty"`
+	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+	// Important: Run "make" to regenerate code after modifying this file
 
-	// ConfigMapName is the name of the ConfigMap containing OpenAPI specs
+	// ConfigMapName is the name of the ConfigMap containing the OpenAPI specifications.
 	// +kubebuilder:validation:Required
 	ConfigMapName string `json:"configMapName"`
 
-	// BasePath is the base path for the Swagger UI server (for Ingress/Route support)
-	// +optional
-	BasePath string `json:"basePath,omitempty"`
-
-	// Image is the Swagger UI server container image
+	// Port is the port number on which the Swagger UI will be exposed.
 	// +kubebuilder:validation:Required
-	Image string `json:"image"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
 
-	// ImagePullPolicy defines the policy for pulling the container image
+	// Image is the Docker image to use for the Swagger UI server.
+	// If not specified, defaults to "ghcr.io/hellices/openapi-multi-swagger:latest".
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// ImagePullPolicy defines the policy for pulling the Docker image.
+	// Defaults to "IfNotPresent".
+	// +optional
 	// +kubebuilder:validation:Enum=Always;Never;IfNotPresent
-	// +kubebuilder:default=IfNotPresent
 	ImagePullPolicy string `json:"imagePullPolicy,omitempty"`
 
-	// Resources defines the compute resource requirements for the server container
+	// Resources defines the CPU and memory resources for the Swagger UI server.
 	// +optional
 	Resources ResourceRequirements `json:"resources,omitempty"`
+
+	// WatchIntervalSeconds is the interval in seconds for the server to check for updates to the ConfigMap.
+	// Defaults to "10".
+	// +optional
+	WatchIntervalSeconds string `json:"watchIntervalSeconds,omitempty"`
+
+	// LogLevel is the logging level for the Swagger UI server.
+	// Valid values are: "trace", "debug", "info", "warn", "error", "fatal", "panic".
+	// Defaults to "info".
+	// +optional
+	// +kubebuilder:validation:Enum=trace;debug;info;warn;error;fatal;panic
+	LogLevel string `json:"logLevel,omitempty"`
+
+	// DevMode enables or disables development mode for the Swagger UI server, which provides more verbose logging.
+	// Valid values are: "true", "false".
+	// Defaults to "false".
+	// +optional
+	// +kubebuilder:validation:Enum="true";"false"
+	DevMode string `json:"devMode,omitempty"`
 }
 
 // ResourceRequirements describes the compute resource requirements

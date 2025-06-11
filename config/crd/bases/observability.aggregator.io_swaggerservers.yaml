@@ -49,37 +49,57 @@ spec:
           spec:
             description: SwaggerServerSpec defines the desired state of SwaggerServer
             properties:
-              basePath:
-                description: BasePath is the base path for the Swagger UI server (for
-                  Ingress/Route support)
-                type: string
               configMapName:
                 description: ConfigMapName is the name of the ConfigMap containing
-                  OpenAPI specs
+                  the OpenAPI specifications.
+                type: string
+              devMode:
+                description: |-
+                  DevMode enables or disables development mode for the Swagger UI server, which provides more verbose logging.
+                  Valid values are: "true", "false".
+                  Defaults to "false".
+                enum:
+                - "true"
+                - "false"
                 type: string
               image:
-                description: Image is the Swagger UI server container image
+                description: |-
+                  Image is the Docker image to use for the Swagger UI server.
+                  If not specified, defaults to "ghcr.io/hellices/openapi-multi-swagger:latest".
                 type: string
               imagePullPolicy:
-                default: IfNotPresent
-                description: ImagePullPolicy defines the policy for pulling the container
-                  image
+                description: |-
+                  ImagePullPolicy defines the policy for pulling the Docker image.
+                  Defaults to "IfNotPresent".
                 enum:
                 - Always
                 - Never
                 - IfNotPresent
                 type: string
+              logLevel:
+                description: |-
+                  LogLevel is the logging level for the Swagger UI server.
+                  Valid values are: "trace", "debug", "info", "warn", "error", "fatal", "panic".
+                  Defaults to "info".
+                enum:
+                - trace
+                - debug
+                - info
+                - warn
+                - error
+                - fatal
+                - panic
+                type: string
               port:
-                default: 9090
-                description: Port is the port number the Swagger UI server will listen
-                  on
+                description: Port is the port number on which the Swagger UI will
+                  be exposed.
                 format: int32
                 maximum: 65535
                 minimum: 1
                 type: integer
               resources:
-                description: Resources defines the compute resource requirements for
-                  the server container
+                description: Resources defines the CPU and memory resources for the
+                  Swagger UI server.
                 properties:
                   limits:
                     additionalProperties:
@@ -94,9 +114,14 @@ spec:
                       resources required
                     type: object
                 type: object
+              watchIntervalSeconds:
+                description: |-
+                  WatchIntervalSeconds is the interval in seconds for the server to check for updates to the ConfigMap.
+                  Defaults to "10".
+                type: string
             required:
             - configMapName
-            - image
+            - port
             type: object
           status:
             description: SwaggerServerStatus defines the observed state of SwaggerServer

@@ -19,10 +19,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time" // Added for RequeueAfter
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta" // Added for SetStatusCondition
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,6 +37,9 @@ import (
 
 	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
 )
+
+// Define a condition type for ConfigMap readiness
+const ConfigMapReadyCondition = "ConfigMapReady"
 
 // SwaggerServerReconciler reconciles a SwaggerServer object
 type SwaggerServerReconciler struct {
@@ -58,17 +63,60 @@ func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	err := r.Get(ctx, req.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
+			// Object not found, return. Created objects are automatically garbage collected.
+			// For additional cleanup logic use finalizers.
 			return ctrl.Result{}, nil
 		}
+		// Error reading the object - requeue the request.
 		return ctrl.Result{}, err
 	}
+
+	// Defer status update to ensure it's always attempted.
+	defer func() {
+		if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
+			logger.Error(updateErr, "Failed to update SwaggerServer status")
+		}
+	}()
 
 	// Check if ConfigMap exists
 	cm := &corev1.ConfigMap{}
 	err = r.Get(ctx, types.NamespacedName{Name: instance.Spec.ConfigMapName, Namespace: req.Namespace}, cm)
 	if err != nil {
+		configMapCondition := metav1.Condition{
+			Type:               ConfigMapReadyCondition,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: instance.Generation,
+		}
+		if errors.IsNotFound(err) {
+			logger.Info("ConfigMap not found, requeuing", "configmap", instance.Spec.ConfigMapName, "namespace", req.Namespace)
+			configMapCondition.Reason = "ConfigMapNotFound"
+			configMapCondition.Message = fmt.Sprintf("ConfigMap %s not found in namespace %s", instance.Spec.ConfigMapName, req.Namespace)
+			apimeta.SetStatusCondition(&instance.Status.Conditions, configMapCondition)
+			instance.Status.Ready = false
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil // Requeue after a delay, not an immediate error
+		}
+		// Other error fetching ConfigMap
 		logger.Error(err, "Failed to get ConfigMap", "configmap", instance.Spec.ConfigMapName)
-		return ctrl.Result{}, err
+		configMapCondition.Reason = "GetConfigMapFailed"
+		configMapCondition.Message = fmt.Sprintf("Failed to get ConfigMap %s: %v", instance.Spec.ConfigMapName, err)
+		apimeta.SetStatusCondition(&instance.Status.Conditions, configMapCondition)
+		instance.Status.Ready = false
+		return ctrl.Result{}, err // Actual error
+	}
+
+	// ConfigMap found, set condition to True
+	apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
+		Type:               ConfigMapReadyCondition,
+		Status:             metav1.ConditionTrue,
+		Reason:             "ConfigMapFound",
+		Message:            fmt.Sprintf("ConfigMap %s found", instance.Spec.ConfigMapName),
+		ObservedGeneration: instance.Generation,
+	})
+
+	// Determine the image to use
+	image := instance.Spec.Image
+	if image == "" {
+		image = "ghcr.io/hellices/openapi-multi-swagger:latest"
 	}
 
 	// Create or update the deployment
@@ -93,7 +141,7 @@ func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					Containers: []corev1.Container{
 						{
 							Name:            "swagger-ui",
-							Image:           instance.Spec.Image,
+							Image:           image, // Use the determined image
 							ImagePullPolicy: corev1.PullPolicy(instance.Spec.ImagePullPolicy),
 							Ports: []corev1.ContainerPort{
 								{
@@ -103,31 +151,33 @@ func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 							},
 							Env: []corev1.EnvVar{
 								{
-									Name:  "SWAGGER_BASE_PATH",
-									Value: instance.Spec.BasePath,
+									Name:  "CONFIGMAP_NAME",
+									Value: instance.Spec.ConfigMapName,
 								},
-							},
-							VolumeMounts: []corev1.VolumeMount{
 								{
-									Name:      "openapi-specs",
-									MountPath: "/specs",
+									Name:  "NAMESPACE",
+									Value: instance.Namespace, // Namespace of the CR
+								},
+								{
+									Name:  "PORT",
+									Value: fmt.Sprintf("%d", instance.Spec.Port),
+								},
+								{
+									Name:  "WATCH_INTERVAL_SECONDS",
+									Value: getValueOrDefault(instance.Spec.WatchIntervalSeconds, "10"),
+								},
+								{
+									Name:  "LOG_LEVEL",
+									Value: getValueOrDefault(instance.Spec.LogLevel, "info"),
+								},
+								{
+									Name:  "DEV_MODE",
+									Value: getValueOrDefault(instance.Spec.DevMode, "false"),
 								},
 							},
 							Resources: corev1.ResourceRequirements{
 								Limits:   resourceListToK8s(instance.Spec.Resources.Limits),
 								Requests: resourceListToK8s(instance.Spec.Resources.Requests),
-							},
-						},
-					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "openapi-specs",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: instance.Spec.ConfigMapName,
-									},
-								},
 							},
 						},
 					},
@@ -208,14 +258,22 @@ func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Update status
+	// If all operations were successful, set Ready to true.
+	// The ConfigMapReady condition is already set.
+	// Additional conditions for Deployment and Service readiness could be added here.
 	instance.Status.Ready = true
 	instance.Status.URL = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", instance.Name, instance.Namespace, instance.Spec.Port)
-	if err := r.Status().Update(ctx, instance); err != nil {
-		logger.Error(err, "Failed to update SwaggerServer status")
-		return ctrl.Result{}, err
-	}
+	// Status update is handled by the deferred function call
 
 	return ctrl.Result{}, nil
+}
+
+// getValueOrDefault returns the value if not empty, otherwise returns the default value.
+func getValueOrDefault(value, defaultValue string) string {
+	if value != "" {
+		return value
+	}
+	return defaultValue
 }
 
 // SetupWithManager sets up the controller with the Manager.

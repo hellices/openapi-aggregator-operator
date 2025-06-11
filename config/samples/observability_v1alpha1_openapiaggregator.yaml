@@ -9,3 +9,4 @@ spec:
   pathAnnotation: "openapi.aggregator.io/path"
   portAnnotation: "openapi.aggregator.io/port"
   allowedMethodsAnnotation: "openapi.aggregator.io/allowed-methods"
+  watchNamespaces: [""]

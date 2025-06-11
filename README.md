@@ -33,36 +33,81 @@ metadata:
 
 ### 3. Create Aggregator Instance
 
+Create an `OpenAPIAggregator` custom resource. This resource tells the operator how to discover services.
+
 ```bash
 kubectl apply -f - <<EOF
 apiVersion: observability.aggregator.io/v1alpha1
 kind: OpenAPIAggregator
 metadata:
   name: openapi-aggregator
+  # The namespace where this CR is created is important.
+  # The generated openapi-specs ConfigMap will be created in this same namespace.
+  namespace: default # Or any namespace where you want the ConfigMap
 spec:
-  labelSelector: {}  # Optional: Filter services by labels
+  # To watch services in the same namespace as this OpenAPIAggregator CR:
+  # watchNamespaces: [] # or leave it undefined
+
+  # To watch services in ALL namespaces (requires ClusterRole permissions for the operator):
+  watchNamespaces: [""] # or ["*"]
+
+  # Default values for service annotations if not specified on the service itself
+  defaultPath: "/v2/api-docs"
+  defaultPort: "8080"
+
+  # Annotation keys used to discover and configure services
+  swaggerAnnotation: "openapi.aggregator.io/swagger" # Service annotation to mark it for discovery
+  pathAnnotation: "openapi.aggregator.io/path"         # Service annotation for custom OpenAPI path
+  portAnnotation: "openapi.aggregator.io/port"         # Service annotation for custom OpenAPI port
+  allowedMethodsAnnotation: "openapi.aggregator.io/allowed-methods" # Service annotation for allowed HTTP methods
 EOF
 ```
 
-### 4. Access Swagger UI
+**Note on `watchNamespaces`**:
+*   If `watchNamespaces` is empty or not provided, the controller watches services in the same namespace as the `OpenAPIAggregator` CR.
+*   If `watchNamespaces` is `[""]` or `["*"]`, the controller watches services in all namespaces. This requires the operator to have cluster-level RBAC permissions to list and watch services across all namespaces.
+*   The `openapi-specs` ConfigMap, which stores the aggregated API information, is always created in the same namespace as the `OpenAPIAggregator` CR itself.
+
+### 4. Create SwaggerServer Instance
+
+To view the aggregated OpenAPI specifications, create a `SwaggerServer` custom resource. This will deploy a Swagger UI instance.
 
 ```bash
-kubectl port-forward -n openapi-aggregator-system svc/openapi-aggregator-openapi-aggregator-swagger-ui 9090:9090
+kubectl apply -f - <<EOF
+apiVersion: observability.aggregator.io/v1alpha1
+kind: SwaggerServer
+metadata:
+  name: swagger-server
+  namespace: default # Should be the same namespace as the OpenAPIAggregator CR and the openapi-specs ConfigMap
+spec:
+  # image: ghcr.io/hellices/openapi-multi-swagger:latest # Optional: Defaults to this image
+  # watchIntervalSeconds: 10 # Optional: How often to check for ConfigMap updates (default: 10)
+  # logLevel: info # Optional: Log level for the Swagger UI server (default: info)
+  # devMode: false # Optional: Enable dev mode for more verbose logging (default: false)
+EOF
+```
+
+### 5. Access Swagger UI
+
+Forward the port of the `SwaggerServer`'s service:
+
+```bash
+# The service name will be <SwaggerServer-CR-Name>-service
+# Check the service name in the namespace where SwaggerServer CR was created.
+# For example, if SwaggerServer CR is named 'swagger-server' in 'default' namespace:
+kubectl port-forward -n default svc/swagger-server-service 9090:8080
 ```
 
 Then open http://localhost:9090 in your browser.
 
 ## Features
 
-- 🔍 **Auto-discovery**: Automatically finds services with OpenAPI specifications using annotations
-- 🔄 **Real-time Updates**: Fetches specifications in real-time and updates every 10 seconds
-- 🎯 **Configurable Endpoints**: Customize OpenAPI spec paths and ports through annotations
-- 🌐 **Unified UI**: Single Swagger UI interface to browse all discovered APIs
-- 📝 **Service Information**: Displays service metadata including namespace and resource type
-- ⚡ **Zero-config Services**: Works with any service that exposes an OpenAPI/Swagger specification
-- 🔒 **Secure API Access**: All API requests from Swagger UI are proxied through the aggregator server instead of direct service access
+- 🔍 **Flexible Service Discovery**: Discover services based on annotations within specified namespaces (CR's namespace, all namespaces, or a list of namespaces (future)).
+- 🔄 **Real-time Updates**: The `OpenAPIAggregator` updates the `openapi-specs` ConfigMap with discovered API information.
+- 📄 **Centralized Specs**: Aggregated API specifications are stored in a `ConfigMap`.
+- 🎨 **Customizable Swagger UI**: The `SwaggerServer` deploys a pre-built Swagger UI (defaults to `ghcr.io/hellices/openapi-multi-swagger:latest`) that reads from the `openapi-specs` ConfigMap.
 
-### 5. Ingress/Route Integration
+### 6. Ingress/Route Integration
 
 You can expose the Swagger UI through Ingress or OpenShift Route. 
 
@@ -115,42 +160,52 @@ spec:
 
 ### Components
 
-1. **Controller**: 
-   - Watches for services with OpenAPI annotations
-   - Collects service metadata and OpenAPI spec URLs
-   - Updates status every 10 seconds
+1. **OpenAPIAggregator Controller**:
+   - Watches for `OpenAPIAggregator` custom resources.
+   - Based on the `watchNamespaces` field, lists and watches `Services` in the specified namespace(s).
+   - Filters services based on the `swaggerAnnotation`.
+   - Collects metadata (path, port, allowed methods) from service annotations or uses defaults from the `OpenAPIAggregator` spec.
+   - Creates/Updates a `ConfigMap` named `openapi-specs` in the same namespace as the `OpenAPIAggregator` CR. This ConfigMap contains the JSON representation of the discovered API endpoints, keyed by `namespace.serviceName`.
 
-2. **Swagger UI Server**: 
-   - Serves unified Swagger UI interface
-   - Fetches OpenAPI specs in real-time
-   - Provides API selection and documentation
-   - Acts as a proxy for all API requests, enhancing security by preventing direct access to services
+2. **SwaggerServer Controller**:
+   - Watches for `SwaggerServer` custom resources.
+   - Deploys a `Deployment` and `Service` for a Swagger UI application (e.g., `ghcr.io/hellices/openapi-multi-swagger:latest`).
+   - Configures the Swagger UI deployment to load API specifications from the `openapi-specs` ConfigMap created by an `OpenAPIAggregator` in the same namespace.
+   - Manages the lifecycle of the Swagger UI deployment and service.
 
-### Request Flow
+3. **Swagger UI Server (Pod)**:
+   - Serves a unified Swagger UI interface.
+   - Loads API definitions from the mounted `openapi-specs` ConfigMap.
+   - Allows users to browse and interact with the aggregated APIs.
+   - API requests are typically proxied by the Swagger UI itself or made directly from the browser, depending on the Swagger UI implementation.
 
-1. User accesses Swagger UI and selects an API endpoint
-2. API request is sent to the Swagger UI Server
-3. Server proxies the request to the target service
-4. Response is returned through the proxy to Swagger UI
+### Request Flow (Simplified)
 
-This proxy architecture provides several benefits:
-- Enhanced security by preventing direct access to services
-- Consistent request routing and handling
-- Ability to add request/response transformations
-- Centralized access control and monitoring
+1.  **Discovery**: `OpenAPIAggregator` controller discovers services with the specified annotation in the configured `watchNamespaces`.
+2.  **Aggregation**: It writes the API details (URL, path, etc.) into the `openapi-specs` ConfigMap in its own namespace.
+3.  **Deployment**: `SwaggerServer` controller deploys a Swagger UI pod, mounting the `openapi-specs` ConfigMap.
+4.  **UI Access**: User accesses the Swagger UI service.
+5.  **Spec Loading**: Swagger UI reads the API list from the `openapi-specs` ConfigMap.
+6.  **Interaction**: User selects an API; Swagger UI displays its documentation and allows interaction.
+
+This setup decouples API discovery/aggregation from the UI presentation. The `OpenAPIAggregator` focuses on finding and preparing API specs, while the `SwaggerServer` focuses on presenting them.
 
 ### Project Structure
 
 ```
 .
-├── api/             # API definitions and generated code
-├── cmd/             # Main application entry point
+├── api/             # API definitions (CRDs for OpenAPIAggregator, SwaggerServer)
+├── cmd/             # Main application entry point for the operator manager
 ├── config/          # Kubernetes manifests and kustomize configs
+│   ├── crd/         # CRD definitions
+│   ├── default/     # Default kustomize overlays
+│   ├── manager/     # Manager (operator) deployment manifests
+│   ├── rbac/        # RBAC configurations (Roles, RoleBindings, ClusterRoles)
+│   └── samples/     # Sample CRs for OpenAPIAggregator and SwaggerServer
 ├── internal/        # Internal packages
-│   └── controller/  # Operator controller logic
-└── pkg/            
-    ├── swagger/     # Swagger UI server implementation
-    └── version/     # Version information
+│   └── controller/  # Operator controller logic for both CRDs
+└── pkg/             # Shared packages (version, etc.)
+# Removed pkg/swagger as the Swagger UI is now a separate Docker image
 ```
 
 ## Development Guide
