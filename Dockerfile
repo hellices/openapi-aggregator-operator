@@ -44,9 +44,6 @@ COPY --from=certificates /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-ce
 # Copy the architecture-specific binary
 COPY --from=builder /workspace/manager_${TARGETARCH} manager
 
-# Copy Swagger UI static files
-COPY --from=builder /workspace/pkg/swagger/swagger-ui/ /swagger-ui/
-
 # Use non-root user
 USER 65532:65532
 
