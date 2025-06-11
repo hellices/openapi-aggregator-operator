@@ -1,5 +1,0 @@
-## Append samples of your project ##
-resources:
-- observability_v1alpha1_openapiaggregator.yaml
-- swagger_v1alpha1_swaggerserver.yaml
-# +kubebuilder:scaffold:manifestskustomizesamples

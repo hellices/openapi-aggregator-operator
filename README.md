@@ -31,71 +31,28 @@ metadata:
     openapi.aggregator.io/allowed-methods: "get,post"  # Optional: Filter allowed HTTP methods
 ```
 
-### 3. Create Aggregator Instance
+### 3. Deploy Sample Custom Resources
 
-Create an `OpenAPIAggregator` custom resource. This resource tells the operator how to discover services.
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: observability.aggregator.io/v1alpha1
-kind: OpenAPIAggregator
-metadata:
-  name: openapi-aggregator
-  # The namespace where this CR is created is important.
-  # The generated openapi-specs ConfigMap will be created in this same namespace.
-  namespace: default # Or any namespace where you want the ConfigMap
-spec:
-  # To watch services in the same namespace as this OpenAPIAggregator CR:
-  # watchNamespaces: [] # or leave it undefined
-
-  # To watch services in ALL namespaces (requires ClusterRole permissions for the operator):
-  watchNamespaces: [""] # or ["*"]
-
-  # Default values for service annotations if not specified on the service itself
-  defaultPath: "/v2/api-docs"
-  defaultPort: "8080"
-
-  # Annotation keys used to discover and configure services
-  swaggerAnnotation: "openapi.aggregator.io/swagger" # Service annotation to mark it for discovery
-  pathAnnotation: "openapi.aggregator.io/path"         # Service annotation for custom OpenAPI path
-  portAnnotation: "openapi.aggregator.io/port"         # Service annotation for custom OpenAPI port
-  allowedMethodsAnnotation: "openapi.aggregator.io/allowed-methods" # Service annotation for allowed HTTP methods
-EOF
-```
-
-**Note on `watchNamespaces`**:
-*   If `watchNamespaces` is empty or not provided, the controller watches services in the same namespace as the `OpenAPIAggregator` CR.
-*   If `watchNamespaces` is `[""]` or `["*"]`, the controller watches services in all namespaces. This requires the operator to have cluster-level RBAC permissions to list and watch services across all namespaces.
-*   The `openapi-specs` ConfigMap, which stores the aggregated API information, is always created in the same namespace as the `OpenAPIAggregator` CR itself.
-
-### 4. Create SwaggerServer Instance
-
-To view the aggregated OpenAPI specifications, create a `SwaggerServer` custom resource. This will deploy a Swagger UI instance.
+After the controller is running, you can deploy the sample `OpenAPIAggregator` and `SwaggerServer` custom resources to your cluster using the files in the `config/samples` directory:
 
 ```bash
-kubectl apply -f - <<EOF
-apiVersion: observability.aggregator.io/v1alpha1
-kind: SwaggerServer
-metadata:
-  name: swagger-server
-  namespace: default # Should be the same namespace as the OpenAPIAggregator CR and the openapi-specs ConfigMap
-spec:
-  # image: ghcr.io/hellices/openapi-multi-swagger:latest # Optional: Defaults to this image
-  # watchIntervalSeconds: 10 # Optional: How often to check for ConfigMap updates (default: 10)
-  # logLevel: info # Optional: Log level for the Swagger UI server (default: info)
-  # devMode: false # Optional: Enable dev mode for more verbose logging (default: false)
-EOF
+kubectl apply -f config/samples/observability_v1alpha1_openapiaggregator.yaml
+kubectl apply -f config/samples/swagger-server-sample.yaml
 ```
 
-### 5. Access Swagger UI
+For a detailed explanation of these sample custom resources, see [config/samples/README.md](config/samples/README.md).
+
+The `openapi-specs` ConfigMap, which stores the aggregated API information, is created in the same namespace as the `OpenAPIAggregator` CR (e.g., `default` if using the sample). The `SwaggerServer` should be deployed in the same namespace to access this ConfigMap.
+
+### 4. Access Swagger UI
 
 Forward the port of the `SwaggerServer`'s service:
 
 ```bash
-# The service name will be <SwaggerServer-CR-Name>-service
-# Check the service name in the namespace where SwaggerServer CR was created.
-# For example, if SwaggerServer CR is named 'swagger-server' in 'default' namespace:
-kubectl port-forward -n default svc/swagger-server-service 9090:8080
+# The service name will be <SwaggerServer-CR-Name>-service.
+# For the sample, the SwaggerServer CR is named 'swagger-ui' in the 'default' namespace (see config/samples/swagger-server-sample.yaml).
+# The service created will be 'swagger-ui' and it will listen on the port defined in the CR's spec.port (9090 for the sample).
+kubectl port-forward -n default svc/swagger-ui 9090:9090
 ```
 
 Then open http://localhost:9090 in your browser.
@@ -107,7 +64,7 @@ Then open http://localhost:9090 in your browser.
 - 📄 **Centralized Specs**: Aggregated API specifications are stored in a `ConfigMap`.
 - 🎨 **Customizable Swagger UI**: The `SwaggerServer` deploys a pre-built Swagger UI (defaults to `ghcr.io/hellices/openapi-multi-swagger:latest`) that reads from the `openapi-specs` ConfigMap.
 
-### 6. Ingress/Route Integration
+### 5. Ingress/Route Integration
 
 You can expose the Swagger UI through Ingress or OpenShift Route. 
 
