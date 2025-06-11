@@ -76,9 +76,6 @@ spec:
         - name: metrics
           containerPort: 8080
           protocol: TCP
-        - name: swagger-ui
-          containerPort: 9090
-          protocol: TCP
         - name: health-probe
           containerPort: 8081
           protocol: TCP
@@ -119,23 +116,6 @@ spec:
   - name: metrics
     port: 8080
     targetPort: metrics
-    protocol: TCP
-  selector:
-    control-plane: controller-manager
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: openapi-aggregator-swagger-ui
-  namespace: openapi-aggregator-system
-  labels:
-    control-plane: controller-manager
-spec:
-  type: ClusterIP
-  ports:
-  - name: swagger-ui
-    port: 9090
-    targetPort: swagger-ui
     protocol: TCP
   selector:
     control-plane: controller-manager

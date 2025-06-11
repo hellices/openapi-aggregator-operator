@@ -435,13 +435,6 @@ rules:
   - ""
   resources:
   - configmaps
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - services
   verbs:
   - create
@@ -580,8 +573,12 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: openapi-aggregator-operator
+    app.kubernetes.io/instance: manager-rolebinding
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: golang
+    app.kubernetes.io/name: clusterrolebinding
+    app.kubernetes.io/part-of: openapi-aggregator-operator
   name: openapi-aggregator-manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -589,7 +586,7 @@ roleRef:
   name: openapi-aggregator-manager-role
 subjects:
 - kind: ServiceAccount
-  name: controller-manager
+  name: openapi-aggregator-controller-manager
   namespace: openapi-aggregator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -640,23 +637,6 @@ spec:
     control-plane: controller-manager
   type: ClusterIP
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  labels:
-    control-plane: controller-manager
-  name: openapi-aggregator-openapi-aggregator-swagger-ui
-  namespace: openapi-aggregator-system
-spec:
-  ports:
-  - name: swagger-ui
-    port: 9090
-    protocol: TCP
-    targetPort: swagger-ui
-  selector:
-    control-plane: controller-manager
-  type: ClusterIP
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -698,9 +678,6 @@ spec:
         ports:
         - containerPort: 8080
           name: metrics
-          protocol: TCP
-        - containerPort: 9090
-          name: swagger-ui
           protocol: TCP
         - containerPort: 8081
           name: health-probe
