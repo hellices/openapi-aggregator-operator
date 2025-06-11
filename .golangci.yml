@@ -1,5 +1,10 @@
 run:
   timeout: 5m
+  dirs:
+    - api
+    - internal
+    - pkg
+    - cmd
 
 linters:
   enable:
@@ -13,6 +18,9 @@ linters:
     - unconvert
     - unused
     - gosimple
+    - gosec
+    - goimports
+    - gocritic
 
 linters-settings:
   gocyclo:
@@ -29,4 +37,5 @@ issues:
   max-same-issues: 0
 
 output:
-  format: colored-line-number
+  formats:
+    - format: colored-line-number

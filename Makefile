@@ -180,7 +180,7 @@ build-all: manifests generate fmt vet ## Build manager binaries for all architec
 	@cd $(LOCALBIN) && ln -sf manager_$$(go env GOARCH) manager
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
+run: fmt vet manifests generate ## Run a controller from your host.
 	DEV_MODE=true go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
@@ -437,3 +437,7 @@ install-tools: bin_dir ## Install all development tools
 	$(MAKE) operator-sdk
 	@echo "Installing envtest assets..."
 	$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN)
+
+# Stop the controller manager
+stop:
+	@echo "To stop the controller manager, press Ctrl+C in the terminal where it is running."

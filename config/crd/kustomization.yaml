@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/observability.aggregator.io_openapiaggregators.yaml
+- bases/observability.aggregator.io_swaggerservers.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

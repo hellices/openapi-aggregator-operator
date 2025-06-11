@@ -23,7 +23,16 @@ import (
 // OpenAPIAggregatorSpec defines the desired state of OpenAPIAggregator
 type OpenAPIAggregatorSpec struct {
 	// LabelSelector selects target deployments to collect OpenAPI specs from
+	// This field is currently not used if WatchNamespaces is implemented as primary.
+	// Consider removing or marking as deprecated if WatchNamespaces becomes the sole method.
 	LabelSelector map[string]string `json:"labelSelector,omitempty"`
+
+	// WatchNamespaces specifies a list of namespaces to watch for services.
+	// If empty or not provided, the controller will watch services in the same namespace as the OpenAPIAggregator CR.
+	// If set to [""] (a list containing a single empty string), the controller will watch services in all namespaces.
+	// Requires appropriate RBAC permissions for watching services in the specified namespaces (e.g., ClusterRole for all namespaces).
+	// +optional
+	WatchNamespaces []string `json:"watchNamespaces,omitempty"`
 
 	// DefaultPath is the default path for OpenAPI documentation
 	// +kubebuilder:default="/v2/api-docs"

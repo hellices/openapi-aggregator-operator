@@ -18,12 +18,14 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -33,15 +35,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
-	"github.com/hellices/openapi-aggregator-operator/pkg/swagger"
 )
 
 // OpenAPIAggregatorReconciler reconciles a OpenAPIAggregator object
 type OpenAPIAggregatorReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	swaggerServer *swagger.Server
-	TestMode      bool
+	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=observability.aggregator.io,resources=openapiaggregators,verbs=get;list;watch;create;update;patch;delete
@@ -51,28 +50,63 @@ type OpenAPIAggregatorReconciler struct {
 
 // Reconcile handles the reconciliation loop for OpenAPIAggregator resources
 func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).V(1) // 기본 로그 레벨을 1로 설정
+	logger := log.FromContext(ctx)
 
-	// Fetch the OpenAPIAggregator instance
 	instance := &observabilityv1alpha1.OpenAPIAggregator{}
-	err := r.Get(ctx, req.NamespacedName, instance)
-	if err != nil {
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
-	// List all services based on label selector
-	var services corev1.ServiceList
-	labelSelector := client.MatchingLabels(instance.Spec.LabelSelector)
-
-	if err := r.List(ctx, &services, labelSelector); err != nil {
+	services, err := r.listServices(ctx, instance, req.Namespace)
+	if err != nil {
 		logger.Error(err, "Failed to list services")
 		return ctrl.Result{}, err
 	}
 
-	// Process each service and collect OpenAPI specs
+	collectedAPIs := r.collectAPIs(ctx, services, instance)
+
+	if err := r.updateStatus(ctx, req.NamespacedName, collectedAPIs); err != nil {
+		logger.Error(err, "Failed to update OpenAPIAggregator status")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.createOrUpdateConfigMap(ctx, req.Namespace, instance, collectedAPIs); err != nil {
+		logger.Error(err, "Failed to create or update ConfigMap")
+		return ctrl.Result{}, err
+	}
+
+	logger.V(1).Info("Reconciliation completed", "collectedAPIs", len(collectedAPIs))
+	return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+}
+
+func (r *OpenAPIAggregatorReconciler) listServices(ctx context.Context, instance *observabilityv1alpha1.OpenAPIAggregator, crNamespace string) (corev1.ServiceList, error) {
+	logger := log.FromContext(ctx)
+	var services corev1.ServiceList
+	listOptions := []client.ListOption{}
+
+	switch {
+	case len(instance.Spec.WatchNamespaces) == 1 && (instance.Spec.WatchNamespaces[0] == "" || instance.Spec.WatchNamespaces[0] == "*"):
+		logger.V(1).Info("Configured to watch services in all namespaces.", "trigger", instance.Spec.WatchNamespaces)
+		// No specific namespace option needed for client.List to fetch from all namespaces.
+	case len(instance.Spec.WatchNamespaces) > 0:
+		logger.Info("Watching specific namespaces is not yet fully implemented. Defaulting to OpenAPIAggregator's namespace.", "specifiedNamespaces", instance.Spec.WatchNamespaces)
+		listOptions = append(listOptions, client.InNamespace(crNamespace))
+	default:
+		logger.V(1).Info("Configured to watch services in the same namespace as the CR.", "namespace", crNamespace)
+		listOptions = append(listOptions, client.InNamespace(crNamespace))
+	}
+
+	if err := r.List(ctx, &services, listOptions...); err != nil {
+		return services, err
+	}
+	return services, nil
+}
+
+func (r *OpenAPIAggregatorReconciler) collectAPIs(ctx context.Context, services corev1.ServiceList, instance *observabilityv1alpha1.OpenAPIAggregator) []observabilityv1alpha1.APIInfo {
+	logger := log.FromContext(ctx)
 	var collectedAPIs []observabilityv1alpha1.APIInfo
 	for _, service := range services.Items {
 		if apiInfo := r.processService(ctx, service, instance); apiInfo != nil {
@@ -80,44 +114,101 @@ func (r *OpenAPIAggregatorReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			collectedAPIs = append(collectedAPIs, *apiInfo)
 		}
 	}
+	return collectedAPIs
+}
 
-	// Update status with retry on conflict
-	retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// Get the latest version
+func (r *OpenAPIAggregatorReconciler) updateStatus(ctx context.Context, namespacedName types.NamespacedName, collectedAPIs []observabilityv1alpha1.APIInfo) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &observabilityv1alpha1.OpenAPIAggregator{}
-		if err := r.Get(ctx, req.NamespacedName, latest); err != nil {
+		if err := r.Get(ctx, namespacedName, latest); err != nil {
 			return err
 		}
-
-		// Update status
 		latest.Status.CollectedAPIs = collectedAPIs
 		return r.Status().Update(ctx, latest)
 	})
+}
 
-	if retryErr != nil {
-		logger.Error(retryErr, "Failed to update OpenAPIAggregator status")
-		return ctrl.Result{}, retryErr
+func (r *OpenAPIAggregatorReconciler) createOrUpdateConfigMap(ctx context.Context, namespace string, instance *observabilityv1alpha1.OpenAPIAggregator, collectedAPIs []observabilityv1alpha1.APIInfo) error {
+	logger := log.FromContext(ctx)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "openapi-specs",
+			Namespace: namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: instance.APIVersion,
+					Kind:       instance.Kind,
+					Name:       instance.Name,
+					UID:        instance.UID,
+					Controller: &[]bool{true}[0],
+				},
+			},
+		},
+		Data: map[string]string{},
 	}
 
-	// Update Swagger UI with collected specs
-	r.swaggerServer.UpdateSpecs(collectedAPIs)
+	for _, api := range collectedAPIs {
+		apiJSON, err := json.Marshal(api)
+		if err != nil {
+			logger.Error(err, "Failed to marshal API info", "api", api.Name)
+			continue
+		}
+		cm.Data[fmt.Sprintf("%s.%s", api.Namespace, api.Name)] = string(apiJSON)
+	}
 
-	logger.V(1).Info("Reconciliation completed", "collectedAPIs", len(collectedAPIs))
+	foundCm := &corev1.ConfigMap{}
+	err := r.Client.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, foundCm)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("ConfigMap not found, creating new one", "ConfigMap.Name", cm.Name, "ConfigMap.Namespace", cm.Namespace)
+			return r.Client.Create(ctx, cm)
+		}
+		return err
+	}
+	// Only update if data has changed
+	if !r.isConfigMapDataEqual(foundCm.Data, cm.Data) {
+		foundCm.Data = cm.Data // Update data
+		return r.Client.Update(ctx, foundCm)
+	}
+	return nil // No update needed
+}
 
-	// Requeue after 10 seconds
-	return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+// isConfigMapDataEqual checks if two ConfigMap data are equal.
+func (r *OpenAPIAggregatorReconciler) isConfigMapDataEqual(d1, d2 map[string]string) bool {
+	if len(d1) != len(d2) {
+		return false
+	}
+	for k, v1 := range d1 {
+		v2, ok := d2[k]
+		if !ok || v1 != v2 {
+			return false
+		}
+	}
+	return true
 }
 
 // processService processes a single service and returns its API info if valid
 func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc corev1.Service, instance *observabilityv1alpha1.OpenAPIAggregator) *observabilityv1alpha1.APIInfo {
-	logger := log.FromContext(ctx).V(1)
+	logger := log.FromContext(ctx)
+
+	// logger.Info("Processing service in processService", "serviceName", svc.Name, "serviceNamespace", svc.Namespace) // Reverted
 
 	// Check if the service has the required swagger annotation
-	if svc.Annotations[instance.Spec.SwaggerAnnotation] != "true" {
-		logger.V(2).Info("Skipping service - missing swagger annotation",
+	annotationValue, annotationExists := svc.Annotations[instance.Spec.SwaggerAnnotation]
+	if !annotationExists {
+		logger.V(1).Info("Skipping service - swagger annotation not found", // Reverted to V(1)
 			"service", svc.Name,
 			"namespace", svc.Namespace,
-			"requiredAnnotation", instance.Spec.SwaggerAnnotation)
+			"requiredAnnotationKey", instance.Spec.SwaggerAnnotation)
+		return nil
+	}
+
+	if annotationValue != "true" {
+		logger.V(1).Info("Skipping service - swagger annotation value is not 'true'", // Reverted to V(1)
+			"service", svc.Name,
+			"namespace", svc.Namespace,
+			"requiredAnnotationKey", instance.Spec.SwaggerAnnotation,
+			"actualValue", annotationValue)
 		return nil
 	}
 
@@ -205,17 +296,6 @@ func (r *OpenAPIAggregatorReconciler) processService(ctx context.Context, svc co
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OpenAPIAggregatorReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Initialize Swagger UI server
-	if r.swaggerServer == nil && !r.TestMode {
-		r.swaggerServer = swagger.NewServer()
-		go func() {
-			log.Log.Info("Starting Swagger UI server on HTTP port 9090")
-			if err := r.swaggerServer.Start(9090); err != nil {
-				log.Log.Error(err, "Failed to start Swagger UI server")
-			}
-		}()
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&observabilityv1alpha1.OpenAPIAggregator{}).
 		Watches(

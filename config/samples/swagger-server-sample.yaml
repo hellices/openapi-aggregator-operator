@@ -1,0 +1,45 @@
+# Sample SwaggerServer configuration for hosting the Swagger UI component
+apiVersion: observability.aggregator.io/v1alpha1
+kind: SwaggerServer
+metadata:
+  name: swagger-ui
+  namespace: default
+  labels:
+    app: swagger-ui
+spec:
+  # Image configuration for the Swagger UI server
+  # If not specified, defaults to "ghcr.io/hellices/openapi-multi-swagger:latest".
+  # image: ghcr.io/hellices/openapi-multi-swagger:latest  # Example, or leave blank for default
+  imagePullPolicy: IfNotPresent
+  
+  # Port configuration
+  port: 9090  # Default port for Swagger UI
+  
+  # ConfigMap reference for OpenAPI specs
+  configMapName: openapi-specs  # Created by OpenAPIAggregator
+  
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+
+  # WatchIntervalSeconds is the interval in seconds for the server to check for updates to the ConfigMap.
+  # Defaults to "10".
+  # +optional
+  watchIntervalSeconds: "15"
+
+  # LogLevel is the logging level for the Swagger UI server.
+  # Valid values are: "trace", "debug", "info", "warn", "error", "fatal", "panic".
+  # Defaults to "info".
+  # +optional
+  logLevel: "debug"
+
+  # DevMode enables or disables development mode for the Swagger UI server, which provides more verbose logging.
+  # Valid values are: "true", "false".
+  # Defaults to "false".
+  # +optional
+  # devMode: "true"

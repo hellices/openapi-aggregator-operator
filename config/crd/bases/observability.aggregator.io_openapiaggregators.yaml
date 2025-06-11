@@ -55,8 +55,10 @@ spec:
               labelSelector:
                 additionalProperties:
                   type: string
-                description: LabelSelector selects target deployments to collect OpenAPI
-                  specs from
+                description: |-
+                  LabelSelector selects target deployments to collect OpenAPI specs from
+                  This field is currently not used if WatchNamespaces is implemented as primary.
+                  Consider removing or marking as deprecated if WatchNamespaces becomes the sole method.
                 type: object
               pathAnnotation:
                 default: openapi.aggregator.io/path
@@ -71,6 +73,15 @@ spec:
                 description: SwaggerAnnotation is the annotation key that indicates
                   if the Service should be included
                 type: string
+              watchNamespaces:
+                description: |-
+                  WatchNamespaces specifies a list of namespaces to watch for services.
+                  If empty or not provided, the controller will watch services in the same namespace as the OpenAPIAggregator CR.
+                  If set to [""] (a list containing a single empty string), the controller will watch services in all namespaces.
+                  Requires appropriate RBAC permissions for watching services in the specified namespaces (e.g., ClusterRole for all namespaces).
+                items:
+                  type: string
+                type: array
             type: object
           status:
             description: OpenAPIAggregatorStatus defines the observed state of OpenAPIAggregator
