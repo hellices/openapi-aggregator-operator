@@ -38,6 +38,7 @@ import (
 	observabilityv1alpha1 "github.com/hellices/openapi-aggregator-operator/api/v1alpha1"
 )
 
+// ConfigMapReadyCondition indicates whether the ConfigMap is ready.
 // Define a condition type for ConfigMap readiness
 const ConfigMapReadyCondition = "ConfigMapReady"
 
@@ -58,122 +59,113 @@ type SwaggerServerReconciler struct {
 func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Fetch the SwaggerServer instance
 	instance := &observabilityv1alpha1.SwaggerServer{}
-	err := r.Get(ctx, req.NamespacedName, instance)
-	if err != nil {
+	if err := r.Get(ctx, req.NamespacedName, instance); err != nil {
 		if errors.IsNotFound(err) {
-			// Object not found, return. Created objects are automatically garbage collected.
-			// For additional cleanup logic use finalizers.
 			return ctrl.Result{}, nil
 		}
-		// Error reading the object - requeue the request.
 		return ctrl.Result{}, err
 	}
 
-	// Defer status update to ensure it's always attempted.
 	defer func() {
 		if updateErr := r.Status().Update(ctx, instance); updateErr != nil {
 			logger.Error(updateErr, "Failed to update SwaggerServer status")
 		}
 	}()
 
-	// Check if ConfigMap exists
-	cm := &corev1.ConfigMap{}
-	err = r.Get(ctx, types.NamespacedName{Name: instance.Spec.ConfigMapName, Namespace: req.Namespace}, cm)
-	if err != nil {
-		configMapCondition := metav1.Condition{
-			Type:               ConfigMapReadyCondition,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: instance.Generation,
-		}
+	if err := r.ensureConfigMapReady(ctx, instance); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Info("ConfigMap not found, requeuing", "configmap", instance.Spec.ConfigMapName, "namespace", req.Namespace)
-			configMapCondition.Reason = "ConfigMapNotFound"
-			configMapCondition.Message = fmt.Sprintf("ConfigMap %s not found in namespace %s", instance.Spec.ConfigMapName, req.Namespace)
-			apimeta.SetStatusCondition(&instance.Status.Conditions, configMapCondition)
-			instance.Status.Ready = false
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil // Requeue after a delay, not an immediate error
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
-		// Other error fetching ConfigMap
-		logger.Error(err, "Failed to get ConfigMap", "configmap", instance.Spec.ConfigMapName)
-		configMapCondition.Reason = "GetConfigMapFailed"
-		configMapCondition.Message = fmt.Sprintf("Failed to get ConfigMap %s: %v", instance.Spec.ConfigMapName, err)
-		apimeta.SetStatusCondition(&instance.Status.Conditions, configMapCondition)
-		instance.Status.Ready = false
-		return ctrl.Result{}, err // Actual error
+		return ctrl.Result{}, err
 	}
 
-	// ConfigMap found, set condition to True
-	apimeta.SetStatusCondition(&instance.Status.Conditions, metav1.Condition{
-		Type:               ConfigMapReadyCondition,
-		Status:             metav1.ConditionTrue,
-		Reason:             "ConfigMapFound",
-		Message:            fmt.Sprintf("ConfigMap %s found", instance.Spec.ConfigMapName),
-		ObservedGeneration: instance.Generation,
-	})
+	if err := r.ensureDeployment(ctx, instance); err != nil {
+		return ctrl.Result{}, err
+	}
 
-	// Determine the image to use
+	if err := r.ensureService(ctx, instance); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	instance.Status.Ready = true
+	instance.Status.URL = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", instance.Name, instance.Namespace, instance.Spec.Port)
+
+	return ctrl.Result{}, nil
+}
+
+func (r *SwaggerServerReconciler) ensureConfigMapReady(ctx context.Context, instance *observabilityv1alpha1.SwaggerServer) error {
+	logger := log.FromContext(ctx)
+	cm := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{Name: instance.Spec.ConfigMapName, Namespace: instance.Namespace}, cm)
+
+	configMapCondition := metav1.Condition{
+		Type:               ConfigMapReadyCondition,
+		ObservedGeneration: instance.Generation,
+	}
+
+	if err != nil {
+		configMapCondition.Status = metav1.ConditionFalse
+		if errors.IsNotFound(err) {
+			logger.Info("ConfigMap not found", "configmap", instance.Spec.ConfigMapName, "namespace", instance.Namespace)
+			configMapCondition.Reason = "ConfigMapNotFound"
+			configMapCondition.Message = fmt.Sprintf("ConfigMap %s not found in namespace %s", instance.Spec.ConfigMapName, instance.Namespace)
+		} else {
+			logger.Error(err, "Failed to get ConfigMap", "configmap", instance.Spec.ConfigMapName)
+			configMapCondition.Reason = "GetConfigMapFailed"
+			configMapCondition.Message = fmt.Sprintf("Failed to get ConfigMap %s: %v", instance.Spec.ConfigMapName, err)
+		}
+		apimeta.SetStatusCondition(&instance.Status.Conditions, configMapCondition)
+		instance.Status.Ready = false
+		return err
+	}
+
+	configMapCondition.Status = metav1.ConditionTrue
+	configMapCondition.Reason = "ConfigMapFound"
+	configMapCondition.Message = fmt.Sprintf("ConfigMap %s found", instance.Spec.ConfigMapName)
+	apimeta.SetStatusCondition(&instance.Status.Conditions, configMapCondition)
+	return nil
+}
+
+func (r *SwaggerServerReconciler) ensureDeployment(ctx context.Context, instance *observabilityv1alpha1.SwaggerServer) error {
+	logger := log.FromContext(ctx)
 	image := instance.Spec.Image
 	if image == "" {
 		image = "ghcr.io/hellices/openapi-multi-swagger:latest"
 	}
 
-	// Create or update the deployment
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
 			Namespace: instance.Namespace,
 		},
-		Spec: appsv1.DeploymentSpec{
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, deploy, func() error {
+		deploy.Spec = appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": instance.Name,
-				},
+				MatchLabels: map[string]string{"app": instance.Name},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": instance.Name,
-					},
+					Labels: map[string]string{"app": instance.Name},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
 							Name:            "swagger-ui",
-							Image:           image, // Use the determined image
+							Image:           image,
 							ImagePullPolicy: corev1.PullPolicy(instance.Spec.ImagePullPolicy),
 							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: instance.Spec.Port,
-									Protocol:      corev1.ProtocolTCP,
-								},
+								{ContainerPort: instance.Spec.Port, Protocol: corev1.ProtocolTCP},
 							},
 							Env: []corev1.EnvVar{
-								{
-									Name:  "CONFIGMAP_NAME",
-									Value: instance.Spec.ConfigMapName,
-								},
-								{
-									Name:  "NAMESPACE",
-									Value: instance.Namespace, // Namespace of the CR
-								},
-								{
-									Name:  "PORT",
-									Value: fmt.Sprintf("%d", instance.Spec.Port),
-								},
-								{
-									Name:  "WATCH_INTERVAL_SECONDS",
-									Value: getValueOrDefault(instance.Spec.WatchIntervalSeconds, "10"),
-								},
-								{
-									Name:  "LOG_LEVEL",
-									Value: getValueOrDefault(instance.Spec.LogLevel, "info"),
-								},
-								{
-									Name:  "DEV_MODE",
-									Value: getValueOrDefault(instance.Spec.DevMode, "false"),
-								},
+								{Name: "CONFIGMAP_NAME", Value: instance.Spec.ConfigMapName},
+								{Name: "NAMESPACE", Value: instance.Namespace},
+								{Name: "PORT", Value: fmt.Sprintf("%d", instance.Spec.Port)},
+								{Name: "WATCH_INTERVAL_SECONDS", Value: getValueOrDefault(instance.Spec.WatchIntervalSeconds, "10")},
+								{Name: "LOG_LEVEL", Value: getValueOrDefault(instance.Spec.LogLevel, "info")},
+								{Name: "DEV_MODE", Value: getValueOrDefault(instance.Spec.DevMode, "false")},
 							},
 							Resources: corev1.ResourceRequirements{
 								Limits:   resourceListToK8s(instance.Spec.Resources.Limits),
@@ -183,44 +175,29 @@ func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					},
 				},
 			},
-		},
-	}
+		}
+		return controllerutil.SetControllerReference(instance, deploy, r.Scheme)
+	})
 
-	// Set the owner reference
-	if err := controllerutil.SetControllerReference(instance, deploy, r.Scheme); err != nil {
-		logger.Error(err, "Failed to set owner reference for Deployment")
-		return ctrl.Result{}, err
-	}
-
-	// Create or update deployment
-	err = r.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, &appsv1.Deployment{})
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if err = r.Create(ctx, deploy); err != nil {
-				logger.Error(err, "Failed to create Deployment")
-				return ctrl.Result{}, err
-			}
-		} else {
-			logger.Error(err, "Failed to get Deployment")
-			return ctrl.Result{}, err
-		}
-	} else {
-		if err = r.Update(ctx, deploy); err != nil {
-			logger.Error(err, "Failed to update Deployment")
-			return ctrl.Result{}, err
-		}
+		logger.Error(err, "Failed to ensure Deployment")
+		return err
 	}
+	return nil
+}
 
-	// Create or update the service
+func (r *SwaggerServerReconciler) ensureService(ctx context.Context, instance *observabilityv1alpha1.SwaggerServer) error {
+	logger := log.FromContext(ctx)
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      instance.Name,
 			Namespace: instance.Namespace,
 		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": instance.Name,
-			},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		svc.Spec = corev1.ServiceSpec{
+			Selector: map[string]string{"app": instance.Name},
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "http",
@@ -229,43 +206,15 @@ func (r *SwaggerServerReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					TargetPort: intstr.FromInt(int(instance.Spec.Port)),
 				},
 			},
-		},
-	}
+		}
+		return controllerutil.SetControllerReference(instance, svc, r.Scheme)
+	})
 
-	// Set the owner reference for the service
-	if err := controllerutil.SetControllerReference(instance, svc, r.Scheme); err != nil {
-		logger.Error(err, "Failed to set owner reference for Service")
-		return ctrl.Result{}, err
-	}
-
-	// Create or update service
-	err = r.Get(ctx, types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}, &corev1.Service{})
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if err = r.Create(ctx, svc); err != nil {
-				logger.Error(err, "Failed to create Service")
-				return ctrl.Result{}, err
-			}
-		} else {
-			logger.Error(err, "Failed to get Service")
-			return ctrl.Result{}, err
-		}
-	} else {
-		if err = r.Update(ctx, svc); err != nil {
-			logger.Error(err, "Failed to update Service")
-			return ctrl.Result{}, err
-		}
+		logger.Error(err, "Failed to ensure Service")
+		return err
 	}
-
-	// Update status
-	// If all operations were successful, set Ready to true.
-	// The ConfigMapReady condition is already set.
-	// Additional conditions for Deployment and Service readiness could be added here.
-	instance.Status.Ready = true
-	instance.Status.URL = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", instance.Name, instance.Namespace, instance.Spec.Port)
-	// Status update is handled by the deferred function call
-
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // getValueOrDefault returns the value if not empty, otherwise returns the default value.
